@@ -24,5 +24,5 @@ mat_keys:
   csi_key: CSIamp
 
 paths:
-  csi_pattern: "A{action_id:02d}/S{subject_id:02d}/frame_{frame_id_1based:03d}.mat"
+  csi_pattern: "A{action_id:02d}/S{subject_id:02d}/wifi-csi/frame{frame_id_1based:03d}.mat"
   gt_pattern: "E{env_id:02d}_S{subject_id:02d}_A{action_id:02d}.npy"

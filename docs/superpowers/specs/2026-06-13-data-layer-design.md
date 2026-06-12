@@ -295,7 +295,7 @@ Env04: train S31-S37, val S38-S39, test S40
 CSI path template:
 
 ```text
-A{action_id:02d}/S{subject_id:02d}/frame_{frame_id_1based:03d}.mat
+A{action_id:02d}/S{subject_id:02d}/wifi-csi/frame{frame_id_1based:03d}.mat
 ```
 
 GT path template:
