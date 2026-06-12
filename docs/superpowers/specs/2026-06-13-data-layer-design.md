@@ -49,6 +49,8 @@ CSI sequence: [297, 10, 3, 114]
 Feature sequence: [297, 12, 10, 114]
 ```
 
+Before transpose, raw CSI frames are cleaned deterministically. `NaN`, `inf`, and negative amplitude values are replaced by the median of valid non-negative values from the same `(rx, subcarrier)` across the 10 packets. If that local packet series is fully invalid, the repair falls back to the frame-level valid non-negative median. Frames with no valid non-negative values remain unrecoverable and should raise an error. Aggregate repair counts are written to `meta_build.json`.
+
 Ground-truth pose files are `.npy` files under `--gt-root`, one file per environment-subject-action sequence:
 
 ```text

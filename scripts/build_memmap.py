@@ -25,6 +25,13 @@ from scripts.scan_gt_stats import scan_gt_stats
 
 
 OUTPUT_FILES = ["X_all.npy", "Y_all.npy", "Conf_all.npy", "meta.npz", "meta_build.json"]
+CSI_REPAIR_STAT_KEYS = (
+    "repaired_frames",
+    "repaired_values",
+    "nan_values",
+    "inf_values",
+    "negative_values",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,10 +66,50 @@ def read_mat_key(path: Path, key: str) -> np.ndarray:
             return np.asarray(handle[key])
 
 
-def standardize_csi_frame(raw: np.ndarray, path: Path) -> np.ndarray:
+def _accumulate_repair_stats(total: dict[str, int] | None, update: dict[str, int]) -> None:
+    if total is None:
+        return
+    for key in CSI_REPAIR_STAT_KEYS:
+        total[key] = int(total.get(key, 0)) + int(update.get(key, 0))
+
+
+def _repair_csi_frame_values(raw: np.ndarray, path: Path) -> tuple[np.ndarray, dict[str, int]]:
+    raw = raw.astype(np.float32, copy=False)
+    finite_mask = np.isfinite(raw)
+    negative_mask = finite_mask & (raw < 0.0)
+    bad_mask = (~finite_mask) | negative_mask
+    stats = {
+        "repaired_frames": int(bad_mask.any()),
+        "repaired_values": int(bad_mask.sum()),
+        "nan_values": int(np.isnan(raw).sum()),
+        "inf_values": int(np.isinf(raw).sum()),
+        "negative_values": int(negative_mask.sum()),
+    }
+    if not bad_mask.any():
+        return raw, stats
+
+    valid_mask = finite_mask & (raw >= 0.0)
+    if not valid_mask.any():
+        raise ValueError(f"{path} raw CSIamp has no finite non-negative values to repair from")
+
+    values_for_median = np.where(valid_mask, raw, np.nan)
+    with np.errstate(all="ignore"):
+        local_median = np.nanmedian(values_for_median, axis=2)
+        frame_median = float(np.nanmedian(values_for_median))
+    local_median = np.where(np.isfinite(local_median), local_median, frame_median).astype(np.float32)
+
+    repaired = raw.copy()
+    repair_values = np.broadcast_to(local_median[:, :, None], raw.shape)
+    repaired[bad_mask] = repair_values[bad_mask]
+    return repaired, stats
+
+
+def standardize_csi_frame(raw: np.ndarray, path: Path, repair_stats: dict[str, int] | None = None) -> np.ndarray:
     if raw.shape != (3, 114, 10):
         raise ValueError(f"{path} raw CSIamp shape must be [3,114,10], got {raw.shape}")
-    return np.transpose(raw, (2, 0, 1)).astype(np.float32, copy=False)
+    repaired, stats = _repair_csi_frame_values(raw, path)
+    _accumulate_repair_stats(repair_stats, stats)
+    return np.transpose(repaired, (2, 0, 1)).astype(np.float32, copy=False)
 
 
 def ensure_output_root(root: Path, overwrite: bool) -> None:
@@ -129,6 +176,7 @@ def build_memmap(cfg: dict[str, Any], csi_root: Path, gt_root: Path, output_root
     feature_cfg = cfg["feature"]
     sequence_count = 0
     invalid_keypoints = 0
+    csi_repair_stats = {key: 0 for key in CSI_REPAIR_STAT_KEYS}
 
     for subject_id in range(1, num_subjects + 1):
         env_id = env_id_from_subject(subject_id, subjects_per_env=dataset_cfg["subjects_per_env"])
@@ -142,7 +190,7 @@ def build_memmap(cfg: dict[str, Any], csi_root: Path, gt_root: Path, output_root
                     frame_id_1based=frame_id_1based,
                 )
                 raw = read_mat_key(csi_path, csi_key)
-                frames.append(standardize_csi_frame(raw, csi_path))
+                frames.append(standardize_csi_frame(raw, csi_path, repair_stats=csi_repair_stats))
             csi_seq = np.stack(frames, axis=0)
 
             gt_path = gt_root / gt_pattern.format(env_id=env_id, subject_id=subject_id, action_id=action_id)
@@ -177,6 +225,7 @@ def build_memmap(cfg: dict[str, Any], csi_root: Path, gt_root: Path, output_root
         "gt_stats": gt_stats,
         "gt_coord_format_detected": coord_format,
         "invalid_keypoints": invalid_keypoints,
+        "csi_repair_stats": csi_repair_stats,
         "config": cfg,
     }
     (output_root / "meta_build.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

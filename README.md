@@ -30,6 +30,16 @@ python scripts/build_memmap.py \
 
 If the server already has CUDA PyTorch installed, do not overwrite it with a CPU-only wheel.
 
+## CSI Cleaning
+
+During memmap construction, each raw CSI frame is converted from `[3, 114, 10]` to `[10, 3, 114]`. If a frame contains `NaN`, `inf`, or negative amplitude values, those values are repaired before feature extraction:
+
+- Use the median of valid non-negative values from the same `(rx, subcarrier)` across the 10 packets.
+- If that local packet series is fully invalid, fall back to the frame-level valid non-negative median.
+- If an entire frame has no valid non-negative values, construction stops with an error.
+
+Repair counts are recorded in `meta_build.json` under `csi_repair_stats`.
+
 ## Feature Ablations
 
 The cached `X_all.npy` always stores all four feature groups as 12 channels. Training code can select feature groups at Dataset read time:

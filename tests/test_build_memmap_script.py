@@ -23,6 +23,38 @@ def test_standardize_csi_frame_rejects_unexpected_shape():
         standardize_csi_frame(raw, Path("frame001.mat"))
 
 
+def test_standardize_csi_frame_repairs_bad_values_and_records_stats():
+    raw = np.ones((3, 114, 10), dtype=np.float32)
+    raw[0, 0, 0] = np.nan
+    raw[1, 1, 1] = np.inf
+    raw[2, 2, 2] = -5.0
+    repair_stats: dict[str, int] = {}
+
+    standardized = standardize_csi_frame(
+        raw,
+        Path("A01/S01/wifi-csi/frame123.mat"),
+        repair_stats=repair_stats,
+    )
+
+    assert standardized.shape == (10, 3, 114)
+    assert np.isfinite(standardized).all()
+    assert (standardized >= 0.0).all()
+    assert standardized[0, 0, 0] == 1.0
+    assert standardized[1, 1, 1] == 1.0
+    assert standardized[2, 2, 2] == 1.0
+    assert repair_stats["repaired_values"] == 3
+    assert repair_stats["nan_values"] == 1
+    assert repair_stats["inf_values"] == 1
+    assert repair_stats["negative_values"] == 1
+    assert repair_stats["repaired_frames"] == 1
+
+
+def test_standardize_csi_frame_rejects_fully_unrepairable_frame():
+    raw = np.full((3, 114, 10), np.nan, dtype=np.float32)
+    with pytest.raises(ValueError, match=r"frame999\.mat.*no finite non-negative"):
+        standardize_csi_frame(raw, Path("A01/S01/wifi-csi/frame999.mat"))
+
+
 def test_default_config_matches_server_csi_layout():
     cfg = yaml.safe_load(Path("configs/build_memmap.yaml").read_text(encoding="utf-8"))
     csi_pattern = cfg["paths"]["csi_pattern"]
