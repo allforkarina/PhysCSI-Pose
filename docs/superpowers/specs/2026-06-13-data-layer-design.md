@@ -118,12 +118,45 @@ channel 6..8   = F_sub    rx0, rx1, rx2
 channel 9..11  = C_ant    rx0, rx1, rx2
 ```
 
+Feature group encoding is fixed:
+
+```text
+feature_id 0 = l_norm   -> channels [0, 1, 2]
+feature_id 1 = d_center -> channels [3, 4, 5]
+feature_id 2 = f_sub    -> channels [6, 7, 8]
+feature_id 3 = c_ant    -> channels [9, 10, 11]
+```
+
+The cache always stores the full 12-channel tensor. Ablation choices happen at Dataset read time through an explicit feature-group selection parameter, not during memmap construction:
+
+```python
+MemmapPoseDataset(
+    root,
+    protocol="source_only",
+    env_id=1,
+    split="train",
+    features=["l_norm", "f_sub"],
+)
+```
+
+Selected output channel counts:
+
+```text
+1 feature group  -> [3, 10, 114]
+2 feature groups -> [6, 10, 114]
+3 feature groups -> [9, 10, 114]
+4 feature groups -> [12, 10, 114]
+```
+
+Do not add feature IDs as extra numeric model inputs in the first version. The feature encoding is metadata for channel selection and ablation only.
+
 Output:
 
 ```text
-X_seq: [297, 12, 10, 114]
-X_frame: [12, 10, 114]
-batch: [B, 12, 10, 114]
+cached X_seq: [297, 12, 10, 114]
+cached X_frame: [12, 10, 114]
+Dataset-selected X_frame: [3 * len(features), 10, 114]
+Dataset-selected batch: [B, 3 * len(features), 10, 114]
 ```
 
 No extra global standardization or clipping is applied to `X`.
@@ -292,6 +325,7 @@ Required invariants:
 
 - Feature output shape is `[297,12,10,114]`.
 - Channel order is fixed and tested.
+- Feature group channel selection is explicit and tested for ablation.
 - `D_center.mean(dim=T)` is approximately zero.
 - `C_ant.mean(dim=R)` is approximately zero.
 - `F_sub` keeps subcarrier length 114 and uses non-zero boundary-safe padding.

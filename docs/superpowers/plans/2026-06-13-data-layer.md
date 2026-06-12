@@ -101,6 +101,16 @@ Data-layer implementation for WiFi CSI based human pose recognition.
 
 The first version builds amplitude-only CSI features once and stores them as mmap-readable `.npy` arrays. Model networks, training loops, inference, and evaluation are intentionally not part of this phase.
 
+The cache always stores all four feature groups as 12 channels. Ablation studies select feature groups at Dataset read time:
+
+```python
+MemmapPoseDataset(root, protocol="source_only", env_id=1, split="train", features=["l_norm"])
+MemmapPoseDataset(root, protocol="source_only", env_id=1, split="train", features=["l_norm", "f_sub"])
+MemmapPoseDataset(root, protocol="source_only", env_id=1, split="train")
+```
+
+The default uses all feature groups: `["l_norm", "d_center", "f_sub", "c_ant"]`.
+
 ## Data Build
 
 Generated files must live outside Git, for example:
@@ -351,9 +361,10 @@ git push
 Create `tests/test_features.py`:
 
 ```python
+import pytest
 import torch
 
-from dataset.features import build_amplitude_features
+from dataset.features import FEATURE_CHANNELS, build_amplitude_features, selected_feature_channels
 
 
 def make_csi_sequence():
@@ -393,6 +404,22 @@ def test_channel_order_uses_feature_blocks_then_rx():
     assert torch.allclose(x[:, 9], outputs.c_ant[:, :, 0, :])
 
 
+def test_feature_channel_mapping_for_ablation():
+    assert FEATURE_CHANNELS == {
+        "l_norm": (0, 1, 2),
+        "d_center": (3, 4, 5),
+        "f_sub": (6, 7, 8),
+        "c_ant": (9, 10, 11),
+    }
+    assert selected_feature_channels(["l_norm"]) == [0, 1, 2]
+    assert selected_feature_channels(["f_sub", "c_ant"]) == [6, 7, 8, 9, 10, 11]
+
+
+def test_invalid_feature_selection_raises():
+    with pytest.raises(ValueError, match="unknown feature"):
+        selected_feature_channels(["raw_amp"])
+
+
 def test_invalid_shape_raises():
     bad = torch.ones(297, 3, 10, 114)
     try:
@@ -426,6 +453,15 @@ import torch
 import torch.nn.functional as F
 
 
+FEATURE_CHANNELS: dict[str, tuple[int, int, int]] = {
+    "l_norm": (0, 1, 2),
+    "d_center": (3, 4, 5),
+    "f_sub": (6, 7, 8),
+    "c_ant": (9, 10, 11),
+}
+DEFAULT_FEATURES: tuple[str, ...] = ("l_norm", "d_center", "f_sub", "c_ant")
+
+
 @dataclass(frozen=True)
 class FeatureComponents:
     x: torch.Tensor
@@ -433,6 +469,19 @@ class FeatureComponents:
     d_center: torch.Tensor
     f_sub: torch.Tensor
     c_ant: torch.Tensor
+
+
+def selected_feature_channels(features: list[str] | tuple[str, ...] | None = None) -> list[int]:
+    names = DEFAULT_FEATURES if features is None else tuple(features)
+    if not names:
+        raise ValueError("features must contain at least one feature name")
+
+    channels: list[int] = []
+    for name in names:
+        if name not in FEATURE_CHANNELS:
+            raise ValueError(f"unknown feature {name!r}; expected one of {list(FEATURE_CHANNELS)}")
+        channels.extend(FEATURE_CHANNELS[name])
+    return channels
 
 
 def _validate_csi_sequence(csiamp: torch.Tensor) -> None:
@@ -696,7 +745,10 @@ from dataset.meta import build_meta_arrays
 
 def write_fake_cache(root):
     n = 40 * 27 * 297
-    np.save(root / "X_all.npy", np.zeros((n, 12, 10, 114), dtype=np.float32))
+    x = np.zeros((n, 12, 10, 114), dtype=np.float32)
+    for channel in range(12):
+        x[:, channel, :, :] = float(channel)
+    np.save(root / "X_all.npy", x)
     np.save(root / "Y_all.npy", np.zeros((n, 17, 2), dtype=np.float32))
     np.save(root / "Conf_all.npy", np.ones((n, 17), dtype=np.float32))
     np.savez(root / "meta.npz", **build_meta_arrays())
@@ -711,6 +763,25 @@ def test_source_only_env01_train_filters_subjects(tmp_path):
     assert item["y"].shape == (17, 2)
     assert item["conf"].shape == (17,)
     assert item["meta"]["subject_id"] in {1, 2, 3, 4, 5, 6, 7}
+
+
+def test_feature_selection_returns_requested_channel_groups(tmp_path):
+    write_fake_cache(tmp_path)
+    l_norm_ds = MemmapPoseDataset(tmp_path, protocol="source_only", env_id=1, split="train", features=["l_norm"])
+    l_norm_item = l_norm_ds[0]
+    assert l_norm_item["x"].shape == (3, 10, 114)
+    assert np.all(l_norm_item["x"][:, 0, 0] == np.array([0.0, 1.0, 2.0], dtype=np.float32))
+
+    combo_ds = MemmapPoseDataset(tmp_path, protocol="source_only", env_id=1, split="train", features=["f_sub", "c_ant"])
+    combo_item = combo_ds[0]
+    assert combo_item["x"].shape == (6, 10, 114)
+    assert np.all(combo_item["x"][:, 0, 0] == np.array([6.0, 7.0, 8.0, 9.0, 10.0, 11.0], dtype=np.float32))
+
+
+def test_invalid_feature_selection_raises(tmp_path):
+    write_fake_cache(tmp_path)
+    with pytest.raises(ValueError, match="unknown feature"):
+        MemmapPoseDataset(tmp_path, protocol="source_only", env_id=1, split="train", features=["raw_amp"])
 
 
 def test_source_only_env02_test_filters_subjects(tmp_path):
@@ -749,17 +820,27 @@ from typing import Any
 
 import numpy as np
 
+from dataset.features import selected_feature_channels
 from dataset.splits import source_only_subjects
 
 
 class MemmapPoseDataset:
-    def __init__(self, root: str | Path, *, protocol: str, env_id: int, split: str) -> None:
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        protocol: str,
+        env_id: int,
+        split: str,
+        features: list[str] | tuple[str, ...] | None = None,
+    ) -> None:
         if protocol == "finetune":
             raise NotImplementedError("finetune protocol is not implemented yet")
         if protocol != "source_only":
             raise ValueError(f"protocol must be 'source_only', got {protocol!r}")
 
         self.root = Path(root)
+        self.feature_channels = selected_feature_channels(features)
         self.x_all = np.load(self.root / "X_all.npy", mmap_mode="r")
         self.y_all = np.load(self.root / "Y_all.npy", mmap_mode="r")
         self.conf_all = np.load(self.root / "Conf_all.npy", mmap_mode="r")
@@ -783,7 +864,7 @@ class MemmapPoseDataset:
             "seq_id": int(self.meta["seq_id"][global_idx]),
         }
         return {
-            "x": self.x_all[global_idx],
+            "x": self.x_all[global_idx, self.feature_channels],
             "y": self.y_all[global_idx],
             "conf": self.conf_all[global_idx],
             "meta": meta_item,
@@ -1125,6 +1206,7 @@ Expected: branch is clean and tracks `origin/main`.
 Spec coverage:
 
 - Amplitude feature definitions are covered in Task 3.
+- Feature group encoding and ablation channel selection are covered in Tasks 3 and 5.
 - GT cleanup and coordinate normalization are covered in Task 4.
 - Neutral metadata and source-only split rules are covered in Task 2.
 - Memmap Dataset reading is covered in Task 5.
