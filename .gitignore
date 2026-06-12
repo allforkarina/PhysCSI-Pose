@@ -34,7 +34,11 @@ runs/
 experiments/
 checkpoints/
 weights/
-models/
+# Model checkpoints/weights (allow source code in models/)
+models/*.pt
+models/*.pth
+models/*.ckpt
+models/*.onnx
 artifacts/
 reports/generated/
 logs/
