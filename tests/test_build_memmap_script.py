@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -28,6 +30,18 @@ def test_default_config_matches_server_csi_layout():
         csi_pattern.format(action_id=1, subject_id=1, frame_id_1based=1)
         == "A01/S01/wifi-csi/frame001.mat"
     )
+
+
+def test_build_script_can_run_directly_from_repo_root():
+    result = subprocess.run(
+        [sys.executable, "scripts/build_memmap.py", "--help"],
+        cwd=Path.cwd(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--csi-root" in result.stdout
 
 
 def test_ensure_output_root_refuses_existing_cache_without_overwrite(tmp_path):
