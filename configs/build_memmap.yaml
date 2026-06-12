@@ -1,0 +1,28 @@
+dataset:
+  num_envs: 4
+  subjects_per_env: 10
+  num_actions: 27
+  num_frames: 297
+  num_packets: 10
+  num_rx: 3
+  num_subcarriers: 114
+  num_joints: 17
+
+feature:
+  eps_log: 1.0e-6
+  eps_mad: 1.0e-6
+  subcarrier_smooth_kernel: 15
+  subcarrier_padding_mode: reflect
+
+gt:
+  image_width: 1920
+  image_height: 1080
+  target_min: -0.8
+  target_max: 0.8
+
+mat_keys:
+  csi_key: CSIamp
+
+paths:
+  csi_pattern: "A{action_id:02d}/S{subject_id:02d}/frame_{frame_id_1based:03d}.mat"
+  gt_pattern: "E{env_id:02d}_S{subject_id:02d}_A{action_id:02d}.npy"
