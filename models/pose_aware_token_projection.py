@@ -56,9 +56,36 @@ class PoseAwareTokenProjection(nn.Module):
         # Stage 1: Channel Refinement  [N, C, T, S] -> [N, C, T, S]
         z_ref = self.channel_refine(z_flat)
 
-        # Placeholder fusion: global average pool (replaced in Task 3-4)
-        h = z_ref.mean(dim=(2, 3))
-        h = h.reshape(B, L, self.token_dim)
+        # ── Stage 2: Global Background Token ──────────────────────────
+        # Mean over time (10 packets) and subcarrier (29 positions) gives
+        # the frame's overall CSI time-frequency response.  This serves as
+        # a stable baseline representing:
+        #   • residual environment and link-gain patterns
+        #   • coarse body occlusion / reflection state
+        #   • overall frame energy distribution
+        # It acts as a fallback when residual attention is uncertain and
+        # helps stabilise few-shot fine-tuning.
+        # ------------------------------------------------------------------
+        h_avg = z_ref.mean(dim=(2, 3))  # [N, C]
+
+        # ── Stage 3: Residual Feature Map ─────────────────────────────
+        # Subtract the frame-level per-channel mean from every time-frequency
+        # position.  Positions that are close to the frame background cancel
+        # to near-zero; positions with local pose-related perturbations are
+        # emphasised.  This continues the de-environmenting philosophy from
+        # CSI preprocessing:
+        #   l_norm:  current amplitude - sequence-level background
+        #   f_sub:   current subcarrier - local smooth background
+        #   c_ant:   current antenna - antenna mean background
+        #   R here:  current TF position - frame-level TF background
+        # Using R (not Z_ref) for attention reduces the risk of the model
+        # latching onto strong-but-not-pose-related environment responses.
+        # ------------------------------------------------------------------
+        z_bg = z_ref.mean(dim=(2, 3), keepdim=True)  # [N, C, 1, 1]
+        r = z_ref - z_bg  # [N, C, T, S]
+
+        # Placeholder fusion: just use h_avg (attention + fusion in Task 4)
+        h = h_avg.reshape(B, L, self.token_dim)
 
         if return_attention:
             return h, {}
