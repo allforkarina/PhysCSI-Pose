@@ -10,12 +10,13 @@
 ## Current Project Status
 
 - The offline data layer is implemented: CSI cleaning, amplitude-only feature construction, label cleaning, metadata construction, source-only split helpers, and mmap-backed Dataset loading.
-- The current model code implements two modules only:
+- The current model code implements three modules:
   - `AmpFeatureMixEncoder`: `[B,12,10,114] -> [B,128,10,29]`.
   - `PoseAwareTokenProjection`: `[B,L,128,10,29] -> [B,L,128]`.
+  - `TemporalLiteTransformer`: `[B,L,128] -> [B,L,128]`.
 - The current implemented model architecture is:
-  `amplitude feature frame -> AmpFeatureMixEncoder -> windowed encoder maps -> PoseAwareTokenProjection -> pose-aware frame tokens`.
-- Temporal relation modelling, final pose regression heads, training loops, inference, and evaluation metrics are not implemented yet.
+  `amplitude feature frame -> AmpFeatureMixEncoder -> windowed encoder maps -> PoseAwareTokenProjection -> TemporalLiteTransformer -> temporal frame tokens`.
+- Final pose regression heads, training loops, inference, and evaluation metrics are not implemented yet.
 - Do not describe the project as an end-to-end pose estimator until those downstream pieces exist and are tested.
 
 ## GitHub Remote

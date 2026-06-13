@@ -2,9 +2,9 @@
 
 WiFi CSI based human pose recognition codebase.
 
-The current project contains the offline data layer plus the first two model
-modules. Training loops, inference, evaluation, temporal relation modelling, and
-final keypoint regression are not implemented yet.
+The current project contains the offline data layer plus the first temporal
+model path modules. Training loops, inference, evaluation, and final keypoint
+regression are not implemented yet.
 
 ## Current Architecture
 
@@ -13,6 +13,7 @@ Implemented modules:
 - `dataset/`: builds amplitude-only CSI features once and stores them as mmap-readable `.npy` arrays.
 - `models.AmpFeatureMixEncoder`: encodes one frame of cached CSI features.
 - `models.PoseAwareTokenProjection`: converts a window of encoder feature maps into compact frame tokens.
+- `models.TemporalLiteTransformer`: models local temporal relations over short frame-token windows.
 
 Current model path:
 
@@ -24,13 +25,14 @@ Encoder map:             [B, 128, 10, 29]
 Window encoder maps:     [B, L, 128, 10, 29]
   -> PoseAwareTokenProjection
 Pose-aware tokens:       [B, L, 128]
+  -> TemporalLiteTransformer
+Temporal tokens:         [B, L, 128]
 ```
 
 The remaining model path is intentionally open:
 
 ```text
-Pose-aware tokens [B, L, 128]
-  -> Temporal Relation Module      # not implemented yet
+Temporal tokens [B, L, 128]
   -> Pose Regression Head          # not implemented yet
   -> 17 keypoints                  # not implemented yet
 ```
@@ -43,6 +45,11 @@ only the subcarrier axis from 114 to 29.
 `PoseAwareTokenProjection` uses channel refinement, a global background token,
 K residual attention maps over the 10x29 time-frequency grid, residual token
 aggregation, and token fusion to produce one 128-D pose-aware token per frame.
+
+`TemporalLiteTransformer` uses local depthwise Conv1d positional encoding, two
+Pre-Norm lightweight Transformer blocks, 4-head non-causal self-attention with
+learnable relative temporal bias, and a 2x FFN. It supports short windows where
+`4 <= L <= 8` and preserves one output token per input frame.
 
 ## Data Build
 
