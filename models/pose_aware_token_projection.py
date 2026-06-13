@@ -162,5 +162,10 @@ class PoseAwareTokenProjection(nn.Module):
         h = h.reshape(B, L, self.token_dim)
 
         if return_attention:
-            return h, {}
+            aux = {
+                "attention_maps": alpha.reshape(B, L, self.num_attention_maps, T, S),
+                "h_avg": h_avg.reshape(B, L, self.in_channels),
+                "h_res_multi": h_res.reshape(B, L, self.num_attention_maps, self.in_channels),
+            }
+            return h, aux
         return h
