@@ -2,10 +2,9 @@
 
 WiFi CSI based human pose recognition codebase.
 
-The current project contains the offline data layer plus three model-path
-modules (encoder, token projection, temporal transformer). Training loops,
-inference, evaluation, and the final pose regression head are not
-implemented yet.
+The current project contains the offline data layer plus model-path modules
+that cover CSI features through pose-coordinate decoding. Training loops,
+inference, evaluation, and end-to-end experiment runners are not implemented yet.
 
 ## Current Architecture
 
@@ -15,6 +14,7 @@ Implemented modules:
 - `models.AmpFeatureMixEncoder`: lightweight depthwise-separable CNN that encodes one frame of 12-channel CSI features into a `[128, 10, 29]` time-frequency map
 - `models.PoseAwareTokenProjection`: residual attention pooling that converts a window of encoder feature maps into compact 128-D pose-aware frame tokens
 - `models.TemporalLiteTransformer`: 2-layer Pre-Norm Transformer over short frame-token windows (L=4–8) with learnable relative temporal bias
+- `models.PoseHeatmapDecoder`: high-resolution heatmap decoder that maps temporal tokens to 17 keypoint coordinates
 
 Current model path:
 
@@ -28,14 +28,8 @@ Window encoder maps:     [B, L, 128, 10, 29]
 Pose-aware tokens:       [B, L, 128]
   -> TemporalLiteTransformer
 Temporal tokens:         [B, L, 128]
-```
-
-The remaining model path is intentionally open:
-
-```text
-Temporal tokens [B, L, 128]
-  -> Pose Regression Head          # not implemented yet
-  -> 17 keypoints                  # not implemented yet
+  -> PoseHeatmapDecoder
+Pose coordinates:        [B, L, 17, 2]
 ```
 
 `AmpFeatureMixEncoder` uses lightweight depthwise-separable CNN blocks with
@@ -51,6 +45,11 @@ aggregation, and token fusion to produce one 128-D pose-aware token per frame.
 Pre-Norm Transformer blocks, 4-head non-causal self-attention with learnable
 relative temporal bias, and 2× FFN expansion.  It operates on short windows
 (4 ≤ L ≤ 8) and preserves one output token per input frame.
+
+`PoseHeatmapDecoder` injects learned joint queries into each temporal token,
+refines per-joint features, decodes a 64x64 heatmap for each joint, and uses
+differentiable soft-argmax to output coordinates in the label range
+`[-0.8, 0.8]`.
 
 ## Data Build
 
