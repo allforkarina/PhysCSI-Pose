@@ -2,18 +2,19 @@
 
 WiFi CSI based human pose recognition codebase.
 
-The current project contains the offline data layer plus the first temporal
-model path modules. Training loops, inference, evaluation, and final keypoint
-regression are not implemented yet.
+The current project contains the offline data layer plus three model-path
+modules (encoder, token projection, temporal transformer). Training loops,
+inference, evaluation, and the final pose regression head are not
+implemented yet.
 
 ## Current Architecture
 
 Implemented modules:
 
-- `dataset/`: builds amplitude-only CSI features once and stores them as mmap-readable `.npy` arrays.
-- `models.AmpFeatureMixEncoder`: encodes one frame of cached CSI features.
-- `models.PoseAwareTokenProjection`: converts a window of encoder feature maps into compact frame tokens.
-- `models.TemporalLiteTransformer`: models local temporal relations over short frame-token windows.
+- `dataset/`: offline CSI feature extraction, GT normalisation, memmap dataset
+- `models.AmpFeatureMixEncoder`: lightweight depthwise-separable CNN that encodes one frame of 12-channel CSI features into a `[128, 10, 29]` time-frequency map
+- `models.PoseAwareTokenProjection`: residual attention pooling that converts a window of encoder feature maps into compact 128-D pose-aware frame tokens
+- `models.TemporalLiteTransformer`: 2-layer Pre-Norm Transformer over short frame-token windows (L=4–8) with learnable relative temporal bias
 
 Current model path:
 
@@ -43,13 +44,13 @@ frequency-only, time-only, and joint time-frequency structure while downsampling
 only the subcarrier axis from 114 to 29.
 
 `PoseAwareTokenProjection` uses channel refinement, a global background token,
-K residual attention maps over the 10x29 time-frequency grid, residual token
+K=4 residual attention maps over the 10×29 time-frequency grid, residual token
 aggregation, and token fusion to produce one 128-D pose-aware token per frame.
 
-`TemporalLiteTransformer` uses local depthwise Conv1d positional encoding, two
-Pre-Norm lightweight Transformer blocks, 4-head non-causal self-attention with
-learnable relative temporal bias, and a 2x FFN. It supports short windows where
-`4 <= L <= 8` and preserves one output token per input frame.
+`TemporalLiteTransformer` uses depthwise Conv1d positional encoding, two
+Pre-Norm Transformer blocks, 4-head non-causal self-attention with learnable
+relative temporal bias, and 2× FFN expansion.  It operates on short windows
+(4 ≤ L ≤ 8) and preserves one output token per input frame.
 
 ## Data Build
 
