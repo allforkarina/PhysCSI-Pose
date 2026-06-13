@@ -1,8 +1,48 @@
 # PhysCSI-Pose
 
-Data-layer implementation for WiFi CSI based human pose recognition.
+WiFi CSI based human pose recognition codebase.
 
-The first version builds amplitude-only CSI features once and stores them as mmap-readable `.npy` arrays. Model networks, training loops, inference, and evaluation are intentionally not part of this phase.
+The current project contains the offline data layer plus the first two model
+modules. Training loops, inference, evaluation, temporal relation modelling, and
+final keypoint regression are not implemented yet.
+
+## Current Architecture
+
+Implemented modules:
+
+- `dataset/`: builds amplitude-only CSI features once and stores them as mmap-readable `.npy` arrays.
+- `models.AmpFeatureMixEncoder`: encodes one frame of cached CSI features.
+- `models.PoseAwareTokenProjection`: converts a window of encoder feature maps into compact frame tokens.
+
+Current model path:
+
+```text
+X frame features:        [B, 12, 10, 114]
+  -> AmpFeatureMixEncoder
+Encoder map:             [B, 128, 10, 29]
+  -> stack over L frames
+Window encoder maps:     [B, L, 128, 10, 29]
+  -> PoseAwareTokenProjection
+Pose-aware tokens:       [B, L, 128]
+```
+
+The remaining model path is intentionally open:
+
+```text
+Pose-aware tokens [B, L, 128]
+  -> Temporal Relation Module      # not implemented yet
+  -> Pose Regression Head          # not implemented yet
+  -> 17 keypoints                  # not implemented yet
+```
+
+`AmpFeatureMixEncoder` uses lightweight depthwise-separable CNN blocks with
+GroupNorm and GELU. It first mixes the 12 physical input channels, then models
+frequency-only, time-only, and joint time-frequency structure while downsampling
+only the subcarrier axis from 114 to 29.
+
+`PoseAwareTokenProjection` uses channel refinement, a global background token,
+K residual attention maps over the 10x29 time-frequency grid, residual token
+aggregation, and token fusion to produce one 128-D pose-aware token per frame.
 
 ## Data Build
 

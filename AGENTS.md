@@ -7,6 +7,17 @@
 - Do not run model inference that requires real WiFi CSI data unless the user explicitly provides suitable data and asks for it.
 - Prefer small, testable modules with clear interfaces for CSI preprocessing, model definition, training utilities, and evaluation helpers.
 
+## Current Project Status
+
+- The offline data layer is implemented: CSI cleaning, amplitude-only feature construction, label cleaning, metadata construction, source-only split helpers, and mmap-backed Dataset loading.
+- The current model code implements two modules only:
+  - `AmpFeatureMixEncoder`: `[B,12,10,114] -> [B,128,10,29]`.
+  - `PoseAwareTokenProjection`: `[B,L,128,10,29] -> [B,L,128]`.
+- The current implemented model architecture is:
+  `amplitude feature frame -> AmpFeatureMixEncoder -> windowed encoder maps -> PoseAwareTokenProjection -> pose-aware frame tokens`.
+- Temporal relation modelling, final pose regression heads, training loops, inference, and evaluation metrics are not implemented yet.
+- Do not describe the project as an end-to-end pose estimator until those downstream pieces exist and are tested.
+
 ## GitHub Remote
 
 - The repository remote must point to `git@github.com:allforkarina/PhysCSI-Pose.git`.
