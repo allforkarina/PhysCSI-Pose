@@ -43,6 +43,41 @@ class PoseAwareTokenProjection(nn.Module):
             nn.GELU(),
         )
 
+        # ── Stage 4: Multi-map Residual Attention ─────────────────────
+        # A 1×1 Conv on the residual map R produces K unnormalised score
+        # maps.  Softmax is applied over the 290 time-frequency positions
+        # (T×S), NOT over channels — the goal is to select WHERE pose-
+        # relevant perturbations occur in the time-frequency grid, not
+        # WHICH feature channels matter.
+        # K=4 allows the model to learn complementary attention patterns
+        # (e.g. upper-body vs. lower-body perturbations) without explicit
+        # body-part supervision.  Larger K increases parameters and
+        # overfitting risk for few-shot fine-tuning.
+        # ------------------------------------------------------------------
+        self.attention_score = nn.Conv2d(in_channels, num_attention_maps, kernel_size=1)
+
+        # ── Stage 5: Token Fusion ────────────────────────────────────
+        # Concatenate the global background token with the K residual
+        # attention tokens, then fuse via a learned linear projection.
+        #   • h_avg provides the stable frame-level baseline (coarse pose,
+        #     environment residual, energy distribution)
+        #   • h_res_multi provides K pose-perturbation foreground summaries
+        #     (local deviations from the frame background)
+        # The fusion layer learns to balance them adaptively — relying on
+        # the background when attention is uncertain, and on residual
+        # tokens when fine-grained pose cues are available.
+        # LayerNorm (not BatchNorm): token-scale stability for downstream
+        # Temporal Relation Module, independent of batch size.
+        # Dropout: reduces source-domain overfitting.
+        # ------------------------------------------------------------------
+        fusion_in = in_channels * (1 + num_attention_maps)  # 128 * (1 + 4) = 640
+        self.fusion = nn.Sequential(
+            nn.Linear(fusion_in, token_dim),
+            nn.LayerNorm(token_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+
     def forward(
         self,
         z: torch.Tensor,
@@ -84,8 +119,47 @@ class PoseAwareTokenProjection(nn.Module):
         z_bg = z_ref.mean(dim=(2, 3), keepdim=True)  # [N, C, 1, 1]
         r = z_ref - z_bg  # [N, C, T, S]
 
-        # Placeholder fusion: just use h_avg (attention + fusion in Task 4)
-        h = h_avg.reshape(B, L, self.token_dim)
+        # ── Stage 4: Attention scores on residual map ────────────────
+        # Generate K score maps from the residual R (NOT from Z_ref).
+        # Using R means attention focuses on "what's unusual relative to
+        # this frame's background" rather than "what's strong in absolute
+        # terms" — this suppresses environment-biased attention.
+        # ------------------------------------------------------------------
+        score = self.attention_score(r)  # [N, K, T, S]
+
+        # Softmax over time-frequency positions (T*S = 290), not over channels.
+        # This forces each attention map to distribute weight across the
+        # time-frequency grid, selecting WHERE pose perturbations occur.
+        score_flat = score.flatten(2)  # [N, K, T*S]
+        alpha_flat = torch.softmax(score_flat, dim=-1)  # [N, K, T*S]
+        alpha = alpha_flat.view_as(score)  # [N, K, T, S]
+
+        # ── Stage 5: Residual attention tokens ────────────────────────
+        # Weighted sum of the residual map R by each attention map alpha.
+        # Because aggregation is over R (not Z_ref), the tokens capture
+        # perturbation patterns relative to the frame background — the
+        # core "residual attention" mechanism that suppresses environmental
+        # bias while preserving pose-relevant local deviations.
+        # ------------------------------------------------------------------
+        r_flat = r.flatten(2)  # [N, C, T*S]
+        h_res = torch.einsum("nkp,ncp->nkc", alpha_flat, r_flat)  # [N, K, C]
+
+        # ── Stage 6: Token Fusion ────────────────────────────────────
+        # Concat global background + K residual tokens, then fuse.
+        # h_avg:  stable whole-frame baseline
+        # h_res:  K foreground perturbation summaries
+        # The Linear layer learns when to trust each source.
+        # ------------------------------------------------------------------
+        h_res_flat = h_res.flatten(1)  # [N, K*C]
+        h_cat = torch.cat([h_avg, h_res_flat], dim=-1)  # [N, C*(1+K)]
+        h = self.fusion(h_cat)  # [N, D]
+
+        # ── Stage 7: Reshape to window structure ─────────────────────
+        # Restore the [B, L, D] layout for the downstream Temporal
+        # Relation Module which models inter-frame motion across the
+        # L-frame window.
+        # ------------------------------------------------------------------
+        h = h.reshape(B, L, self.token_dim)
 
         if return_attention:
             return h, {}
