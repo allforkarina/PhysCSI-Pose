@@ -2,19 +2,22 @@
 
 WiFi CSI based human pose recognition codebase.
 
-The current project contains the offline data layer plus model-path modules
-that cover CSI features through pose-coordinate decoding. Training loops,
-inference, evaluation, and end-to-end experiment runners are not implemented yet.
+The current project contains the offline data layer, model-path modules, and
+configurable training/evaluation entry points. Local verification uses synthetic
+tests only; real training and evaluation should run on the Linux server with the
+memmap dataset.
 
 ## Current Architecture
 
 Implemented modules:
 
 - `dataset/`: offline CSI feature extraction, GT normalisation, memmap dataset
+- `engine/`: temporal-window Dataset, masked coordinate loss, metrics, and train/eval loop helpers
 - `models.AmpFeatureMixEncoder`: lightweight depthwise-separable CNN that encodes one frame of 12-channel CSI features into a `[128, 10, 29]` time-frequency map
 - `models.PoseAwareTokenProjection`: residual attention pooling that converts a window of encoder feature maps into compact 128-D pose-aware frame tokens
 - `models.TemporalLiteTransformer`: 2-layer Pre-Norm Transformer over short frame-token windows (L=4–8) with learnable relative temporal bias
 - `models.PoseHeatmapDecoder`: high-resolution heatmap decoder that maps temporal tokens to 17 keypoint coordinates
+- `models.PhysCSIPoseNet`: end-to-end wrapper used by `train.py` and `eval.py`
 
 Current model path:
 
@@ -31,6 +34,16 @@ Temporal tokens:         [B, L, 128]
   -> PoseHeatmapDecoder
 Pose coordinates:        [B, L, 17, 2]
 ```
+
+`PhysCSIPoseNet` wraps this path and accepts temporal windows directly:
+
+```text
+Input:  [B, L, C, 10, 114]
+Output: [B, L, 17, 2]
+```
+
+`C` is selected at Dataset read time for feature ablations. The default uses all
+12 channels; selecting two feature groups uses 6 channels.
 
 `AmpFeatureMixEncoder` uses lightweight depthwise-separable CNN blocks with
 GroupNorm and GELU. It first mixes the 12 physical input channels, then models
@@ -98,3 +111,64 @@ MemmapPoseDataset(root, protocol="source_only", env_id=1, split="train")
 ```
 
 The default uses all feature groups: `["l_norm", "d_center", "f_sub", "c_ant"]`.
+
+## Training
+
+Training uses continuous temporal windows from the frame-level memmap cache.
+The default protocol is `source_only`, where `env_id` is configurable and the
+split is generated dynamically from subject IDs:
+
+```text
+train: S01-S07 within the selected environment
+val:   S08-S09 within the selected environment
+test:  S10 within the selected environment
+```
+
+Example commands:
+
+```bash
+python train.py --config configs/train.yaml --env-id 1 --protocol source_only --device auto
+python train.py --config configs/train.yaml --env-id 3 --protocol source_only --run-name env03_baseline
+```
+
+Training outputs are generated under `runs/` and are ignored by Git:
+
+```text
+runs/<run_name>/
+  checkpoints/best.pt
+  checkpoints/last.pt
+  metrics.jsonl
+  config_resolved.yaml
+  window_index/train.npz
+  window_index/val.npz
+```
+
+The first training run builds cached window-index files. Later runs reuse those
+index files unless `data.window.rebuild_index: true` is set in the config.
+
+## Evaluation
+
+Evaluation loads a checkpoint and computes confidence-masked metrics. Overlapping
+window predictions for the same frame are averaged before formal metrics are
+computed.
+
+Example commands:
+
+```bash
+python eval.py --config configs/eval.yaml --checkpoint runs/env03_baseline/checkpoints/best.pt --env-id 3 --split test
+python eval.py --config configs/eval.yaml --checkpoint runs/env03_baseline/checkpoints/best.pt --env-id 3 --split test --save-predictions
+```
+
+Evaluation outputs are generated under `outputs/` and are ignored by Git:
+
+```text
+outputs/<eval_name>/
+  metrics.json
+  config_resolved.yaml
+  predictions.npz   # only when --save-predictions is used
+```
+
+Metrics include masked SmoothL1 loss, normalized MPJPE, PCK@0.05/0.10/0.20/0.50,
+per-joint PCK, prediction joint std, and GT joint std. Invalid keypoints are
+ignored only through `conf <= 0`; coordinates such as `(0, 0)` are valid when
+their confidence is positive.

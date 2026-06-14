@@ -10,15 +10,17 @@
 ## Current Project Status
 
 - The offline data layer is implemented: CSI cleaning, amplitude-only feature construction, label cleaning, metadata construction, source-only split helpers, and mmap-backed Dataset loading.
-- The current model code implements four modules:
+- The current model code implements these modules:
   - `AmpFeatureMixEncoder`: `[B,12,10,114] -> [B,128,10,29]`.
   - `PoseAwareTokenProjection`: `[B,L,128,10,29] -> [B,L,128]`.
   - `TemporalLiteTransformer`: `[B,L,128] -> [B,L,128]`.
   - `PoseHeatmapDecoder`: `[B,L,128] -> [B,L,17,2]`.
+  - `PhysCSIPoseNet`: `[B,L,C,10,114] -> [B,L,17,2]`, where `C` is selected from cached feature groups for ablations.
 - The current implemented model architecture is:
   `amplitude feature frame -> AmpFeatureMixEncoder -> windowed encoder maps -> PoseAwareTokenProjection -> TemporalLiteTransformer -> PoseHeatmapDecoder -> pose coordinates`.
-- Training loops, inference, and evaluation metrics are not implemented yet.
-- Do not describe the project as an end-to-end pose estimator until those downstream pieces exist and are tested.
+- Training and evaluation code is implemented through `train.py`, `eval.py`, and `engine/`.
+- Local verification still uses synthetic tests only. Real training/evaluation should run on the Linux server with memmap data under `/data/WiFiPose/dataset/memmap`.
+- Do not claim model accuracy, inference quality, or runtime performance without an explicit real-data evaluation run.
 
 ## GitHub Remote
 
@@ -40,6 +42,7 @@ Do not push:
 - Raw or processed WiFi CSI datasets.
 - Model checkpoints, weights, or exported inference artifacts.
 - Experiment outputs, plots, tensorboard logs, generated reports, caches, local virtual environments, or editor metadata.
+- `runs/` and `outputs/` contents, including checkpoints, metrics exports, predictions, and cached window-index files.
 - Credentials, tokens, private machine paths, or user-specific runtime configuration.
 
 ## Verification Expectations
