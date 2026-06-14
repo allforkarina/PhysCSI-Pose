@@ -7,7 +7,7 @@ from typing import Any
 import torch
 
 from engine.losses import masked_smooth_l1_loss
-from engine.metrics import compute_pose_metrics
+from engine.metrics import aggregate_window_predictions_mean, compute_pose_metrics
 
 
 def _to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
@@ -82,6 +82,7 @@ def evaluate_one_epoch(
     preds: list[torch.Tensor] = []
     targets: list[torch.Tensor] = []
     confs: list[torch.Tensor] = []
+    global_indices: list[torch.Tensor] = []
 
     for batch in loader:
         batch = _to_device(batch, device)
@@ -95,10 +96,22 @@ def evaluate_one_epoch(
         preds.append(pred.detach().cpu())
         targets.append(batch["y"].detach().cpu())
         confs.append(batch["conf"].detach().cpu())
+        if "global_idx" in batch:
+            global_indices.append(batch["global_idx"].detach().cpu())
 
     pred_all = torch.cat(preds, dim=0)
     target_all = torch.cat(targets, dim=0)
     conf_all = torch.cat(confs, dim=0)
+    if global_indices:
+        global_idx_all = torch.cat(global_indices, dim=0)
+        pred_all, unique_idx = aggregate_window_predictions_mean(pred_all, global_idx_all)
+        flat_idx = global_idx_all.reshape(-1)
+        flat_target = target_all.reshape(-1, target_all.shape[-2], target_all.shape[-1])
+        flat_conf = conf_all.reshape(-1, conf_all.shape[-1])
+        first_positions = torch.stack([(flat_idx == idx).nonzero(as_tuple=False)[0, 0] for idx in unique_idx])
+        target_all = flat_target[first_positions]
+        conf_all = flat_conf[first_positions]
+
     metrics = compute_pose_metrics(
         pred_all,
         target_all,
