@@ -11,32 +11,35 @@ class AmpFeatureMixEncoder(nn.Module):
     intermediate time-frequency feature map.  A downstream Pose Regression Head
     consumes this output to predict 17 2D keypoints.
 
-    Input:  [B, 12, 10, 114]  — 4 feature groups × 3 Rx antennas, 10 packets, 114 subcarriers
+    Input:  [B, C, 10, 114]  — default C=12: 4 feature groups × 3 Rx antennas, 10 packets, 114 subcarriers
     Output: [B, 128, 10, 29]  — time-frequency feature map (no global pooling)
     """
 
     # ------------------------------------------------------------------
-    # Input channel layout (immutable — defined by the data build pipeline)
+    # Default input channel layout (defined by the data build pipeline)
     # ------------------------------------------------------------------
     # Channel  0– 2 : l_norm    rx0, rx1, rx2   — median/MAD-normalised amplitude residual
     # Channel  3– 5 : d_center  rx0, rx1, rx2   — short-time centred dynamics (~100 ms)
     # Channel  6– 8 : f_sub     rx0, rx1, rx2   — subcarrier local contrast
     # Channel  9–11 : c_ant     rx0, rx1, rx2   — inter-antenna relative amplitude
 
-    def __init__(self) -> None:
+    def __init__(self, input_channels: int = 12) -> None:
         super().__init__()
+        assert input_channels >= 1, f"expected input_channels >= 1, got {input_channels}"
+        self.input_channels = input_channels
 
         # ── Stage 0: Channel Projection ─────────────────────────────
         # 1×1 Conv only in the channel dimension — does NOT mix time or subcarrier axes.
         # Acts as a learnable "physical-feature fuser":
-        #   • learns weighted combinations of l_norm, d_center, f_sub, c_ant
-        #   • learns how to combine the three Rx antennas
+        #   • by default, learns weighted combinations of l_norm, d_center, f_sub, c_ant
+        #   • by default, learns how to combine the three Rx antennas
+        #   • also supports ablated feature-channel sets selected by config
         #   • preserves the raw time (10) and subcarrier (114) structure
         # Using a 1×1 Conv avoids prematurely destroying the input's physical
         # channel semantics with a large spatial kernel.
         # ------------------------------------------------------------------
         self.stage0 = nn.Sequential(
-            nn.Conv2d(12, 32, kernel_size=1),
+            nn.Conv2d(input_channels, 32, kernel_size=1),
             nn.GroupNorm(num_groups=8, num_channels=32),
             nn.GELU(),
         )
@@ -117,12 +120,14 @@ class AmpFeatureMixEncoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Input guard — catch shape mismatches early
-        assert x.ndim == 4, f"expected 4D input [B,12,10,114], got ndim={x.ndim}"
-        assert x.shape[1] == 12, f"expected 12 input channels, got {x.shape[1]}"
+        assert x.ndim == 4, f"expected 4D input [B,C,10,114], got ndim={x.ndim}"
+        assert x.shape[1] == self.input_channels, (
+            f"expected {self.input_channels} input channels, got {x.shape[1]}"
+        )
         assert x.shape[2] == 10, f"expected 10 time steps, got {x.shape[2]}"
         assert x.shape[3] == 114, f"expected 114 subcarriers, got {x.shape[3]}"
 
-        # Stage 0: Channel Projection  [B,12,10,114] → [B,32,10,114]
+        # Stage 0: Channel Projection  [B,C,10,114] → [B,32,10,114]
         x = self.stage0(x)
 
         # Stage 1: Frequency Block  [B,32,10,114] → [B,48,10,114]

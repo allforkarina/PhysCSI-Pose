@@ -39,6 +39,23 @@ def test_input_guard_wrong_channels():
         encoder(x)
 
 
+def test_encoder_accepts_configurable_input_channels():
+    encoder = AmpFeatureMixEncoder(input_channels=6)
+    x = torch.randn(2, 6, 10, 114)
+
+    z = encoder(x)
+
+    assert z.shape == (2, 128, 10, 29)
+
+
+def test_configurable_encoder_guard_reports_expected_channels():
+    encoder = AmpFeatureMixEncoder(input_channels=6)
+    x = torch.randn(2, 12, 10, 114)
+
+    with pytest.raises(AssertionError, match="expected 6 input channels"):
+        encoder(x)
+
+
 def test_input_guard_wrong_time():
     """Forward raises on wrong time dimension."""
     encoder = AmpFeatureMixEncoder()
