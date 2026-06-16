@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,9 @@ from torch.utils.data import DataLoader
 from dataset.features import selected_feature_channels
 from engine.loops import evaluate_one_epoch
 from engine.window_dataset import WindowMemmapPoseDataset
-from train import _build_model, _feature_names, load_config_with_overrides, resolve_device
+from train import _build_model, _feature_names, _fmt_float, _setup_logging, load_config_with_overrides, resolve_device
+
+LOGGER = logging.getLogger("physcsi_pose.eval")
 
 
 def make_eval_name(checkpoint: Path, split: str) -> str:
@@ -27,6 +31,27 @@ def build_eval_dir(output_dir: str | Path, eval_name: str) -> Path:
     eval_dir = Path(output_dir) / eval_name
     eval_dir.mkdir(parents=True, exist_ok=True)
     return eval_dir
+
+
+def _format_eval_log(
+    *,
+    split: str,
+    metrics: dict[str, Any],
+    elapsed_sec: float,
+) -> str:
+    return (
+        f"split={split} "
+        f"{split}_loss={_fmt_float(metrics.get(f'{split}_loss'))} "
+        f"mpjpe_norm={_fmt_float(metrics.get('mpjpe_norm'))} "
+        f"pck@0.05={_fmt_float(metrics.get('pck_0.05'), precision=4)} "
+        f"pck@0.10={_fmt_float(metrics.get('pck_0.10'), precision=4)} "
+        f"pck@0.20={_fmt_float(metrics.get('pck_0.20'), precision=4)} "
+        f"pck@0.50={_fmt_float(metrics.get('pck_0.50'), precision=4)} "
+        f"joint_std_mean={_fmt_float(metrics.get('mean_joint_std'))} "
+        f"joint_std_min={_fmt_float(metrics.get('min_joint_std'))} "
+        f"gt_joint_std_mean={_fmt_float(metrics.get('gt_mean_joint_std'))} "
+        f"time={elapsed_sec:.1f}s"
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -100,6 +125,7 @@ def _save_raw_predictions(
 
 
 def main() -> None:
+    _setup_logging()
     args = _parse_args()
     cfg = load_config_with_overrides(args.config, overrides=_cli_overrides(args))
 
@@ -114,6 +140,7 @@ def main() -> None:
     eval_name = experiment_cfg.get("eval_name") or make_eval_name(checkpoint_path, split)
     experiment_cfg["eval_name"] = str(eval_name)
     eval_dir = build_eval_dir(experiment_cfg.get("output_dir", "outputs"), str(eval_name))
+    LOGGER.info("eval_dir=%s checkpoint=%s split=%s", eval_dir, checkpoint_path, split)
 
     feature_names = _feature_names(cfg)
     input_channels = len(selected_feature_channels(feature_names))
@@ -125,6 +152,7 @@ def main() -> None:
 
     with (eval_dir / "config_resolved.yaml").open("w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
+    LOGGER.info("resolved_config=%s", eval_dir / "config_resolved.yaml")
 
     device = resolve_device(str(experiment_cfg.get("device", "auto")))
     protocol = str(experiment_cfg.get("protocol", "source_only"))
@@ -132,6 +160,7 @@ def main() -> None:
     window_length = int(window_cfg.get("length", 4))
     stride = int(window_cfg.get("stride", 1))
     rebuild_index = bool(window_cfg.get("rebuild_index", False))
+    LOGGER.info("device=%s protocol=%s env_id=%d", device, protocol, env_id)
 
     dataset = WindowMemmapPoseDataset(
         data_cfg["memmap_root"],
@@ -144,6 +173,15 @@ def main() -> None:
         features=feature_names,
         rebuild_index=rebuild_index,
     )
+    LOGGER.info(
+        "data memmap_root=%s features=%s input_channels=%d window_length=%d stride=%d windows=%d",
+        data_cfg["memmap_root"],
+        feature_names or ["l_norm", "d_center", "f_sub", "c_ant"],
+        input_channels,
+        window_length,
+        stride,
+        len(dataset),
+    )
     loader = DataLoader(
         dataset,
         batch_size=int(eval_cfg.get("batch_size", 32)),
@@ -155,9 +193,15 @@ def main() -> None:
     model = _build_model(cfg, input_channels=input_channels).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model"])
+    LOGGER.info(
+        "loaded_checkpoint epoch=%s best_metric=%s",
+        checkpoint.get("epoch", "unknown"),
+        checkpoint.get("best_metric", "unknown"),
+    )
 
     amp_enabled = bool(eval_cfg.get("amp", True)) and device.type == "cuda"
     pck_thresholds = tuple(float(v) for v in metrics_cfg.get("pck_thresholds", [0.05, 0.10, 0.20, 0.50]))
+    eval_start = time.perf_counter()
     metrics = evaluate_one_epoch(
         model,
         loader,
@@ -166,9 +210,12 @@ def main() -> None:
         pck_thresholds=pck_thresholds,
         loss_prefix=split,
     )
+    elapsed_sec = time.perf_counter() - eval_start
 
     with (eval_dir / "metrics.json").open("w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, sort_keys=True)
+    LOGGER.info("%s", _format_eval_log(split=split, metrics=metrics, elapsed_sec=elapsed_sec))
+    LOGGER.info("metrics_path=%s", eval_dir / "metrics.json")
 
     if bool(experiment_cfg.get("save_predictions", False)):
         _save_raw_predictions(
@@ -178,6 +225,7 @@ def main() -> None:
             amp_enabled=amp_enabled,
             path=eval_dir / "predictions.npz",
         )
+        LOGGER.info("predictions_path=%s", eval_dir / "predictions.npz")
 
 
 if __name__ == "__main__":

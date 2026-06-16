@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random
+import sys
+import time
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +20,8 @@ from dataset.features import selected_feature_channels
 from engine.loops import evaluate_one_epoch, train_one_epoch
 from engine.window_dataset import WindowMemmapPoseDataset
 from models import PhysCSIPoseNet
+
+LOGGER = logging.getLogger("physcsi_pose.train")
 
 
 def deep_update(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
@@ -64,6 +69,50 @@ def resolve_device(device: str) -> torch.device:
     if device == "auto":
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return torch.device(device)
+
+
+def _setup_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
+        force=True,
+    )
+
+
+def _fmt_float(value: Any, precision: int = 6) -> str:
+    if value is None:
+        return "nan"
+    return f"{float(value):.{precision}f}"
+
+
+def _format_epoch_log(
+    *,
+    epoch: int,
+    epochs: int,
+    metrics: dict[str, Any],
+    monitor: str,
+    best_metric: float | None,
+    stale_epochs: int,
+    elapsed_sec: float,
+) -> str:
+    return (
+        f"epoch={epoch:03d}/{epochs} "
+        f"lr={_fmt_float(metrics.get('lr'))} "
+        f"train_loss={_fmt_float(metrics.get('train_loss'))} "
+        f"val_loss={_fmt_float(metrics.get('val_loss'))} "
+        f"mpjpe_norm={_fmt_float(metrics.get('mpjpe_norm'))} "
+        f"pck@0.05={_fmt_float(metrics.get('pck_0.05'), precision=4)} "
+        f"pck@0.10={_fmt_float(metrics.get('pck_0.10'), precision=4)} "
+        f"pck@0.20={_fmt_float(metrics.get('pck_0.20'), precision=4)} "
+        f"pck@0.50={_fmt_float(metrics.get('pck_0.50'), precision=4)} "
+        f"joint_std_mean={_fmt_float(metrics.get('mean_joint_std'))} "
+        f"joint_std_min={_fmt_float(metrics.get('min_joint_std'))} "
+        f"best_{monitor}={_fmt_float(best_metric)} "
+        f"stale={stale_epochs} "
+        f"time={elapsed_sec:.1f}s"
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -173,6 +222,7 @@ def _save_checkpoint(
 
 
 def main() -> None:
+    _setup_logging()
     args = _parse_args()
     cfg = load_config_with_overrides(args.config, overrides=_cli_overrides(args))
 
@@ -192,10 +242,12 @@ def main() -> None:
     run_name = experiment_cfg.get("run_name") or make_run_name(protocol, env_id, window_length)
     experiment_cfg["run_name"] = run_name
     run_dir = build_run_dir(experiment_cfg.get("output_dir", "runs"), str(run_name))
+    LOGGER.info("run_dir=%s", run_dir)
 
     seed = int(experiment_cfg.get("seed", 42))
     _seed_everything(seed)
     device = resolve_device(str(experiment_cfg.get("device", "auto")))
+    LOGGER.info("device=%s seed=%d protocol=%s env_id=%d", device, seed, protocol, env_id)
 
     feature_names = _feature_names(cfg)
     input_channels = len(selected_feature_channels(feature_names))
@@ -207,6 +259,7 @@ def main() -> None:
 
     with (run_dir / "config_resolved.yaml").open("w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
+    LOGGER.info("resolved_config=%s", run_dir / "config_resolved.yaml")
 
     memmap_root = data_cfg["memmap_root"]
     stride = int(window_cfg.get("stride", 1))
@@ -251,6 +304,24 @@ def main() -> None:
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
+    LOGGER.info(
+        "data memmap_root=%s features=%s input_channels=%d window_length=%d stride=%d rebuild_index=%s",
+        memmap_root,
+        feature_names or ["l_norm", "d_center", "f_sub", "c_ant"],
+        input_channels,
+        window_length,
+        stride,
+        rebuild_index,
+    )
+    LOGGER.info(
+        "splits train=%s windows=%d val=%s windows=%d batch_size=%d num_workers=%d",
+        split_cfg.get("train", "train"),
+        len(train_dataset),
+        split_cfg.get("val", "val"),
+        len(val_dataset),
+        batch_size,
+        num_workers,
+    )
 
     model = _build_model(cfg, input_channels=input_channels).to(device)
     base_lr = float(train_cfg.get("lr", 1.0e-3))
@@ -281,8 +352,27 @@ def main() -> None:
     early_best_metric: float | None = None
     stale_epochs = 0
     metrics_path = run_dir / "metrics.jsonl"
+    n_params = sum(p.numel() for p in model.parameters())
+    LOGGER.info(
+        "model params=%d optimizer=AdamW lr=%.6g weight_decay=%.6g amp=%s epochs=%d warmup_epochs=%d",
+        n_params,
+        base_lr,
+        float(train_cfg.get("weight_decay", 1.0e-4)),
+        amp_enabled,
+        epochs,
+        int(scheduler_cfg.get("warmup_epochs", 10)),
+    )
+    LOGGER.info(
+        "checkpoint monitor=%s mode=%s early_stopping=%s patience=%d metrics_path=%s",
+        monitor,
+        mode,
+        early_enabled,
+        patience,
+        metrics_path,
+    )
 
     for epoch in range(1, epochs + 1):
+        epoch_start = time.perf_counter()
         train_metrics = train_one_epoch(
             model,
             train_loader,
@@ -310,6 +400,7 @@ def main() -> None:
             f.write(json.dumps(epoch_metrics, sort_keys=True) + "\n")
 
         current = float(epoch_metrics[monitor])
+        saved_best = False
         if _is_better(current, best_metric, mode=mode, min_delta=0.0):
             best_metric = current
             if bool(checkpoint_cfg.get("save_best", True)):
@@ -322,6 +413,7 @@ def main() -> None:
                     best_metric=best_metric,
                     config=cfg,
                 )
+                saved_best = True
 
         if bool(checkpoint_cfg.get("save_last", True)):
             _save_checkpoint(
@@ -340,8 +432,29 @@ def main() -> None:
             stale_epochs = 0
         else:
             stale_epochs += 1
+        LOGGER.info(
+            "%s",
+            _format_epoch_log(
+                epoch=epoch,
+                epochs=epochs,
+                metrics=epoch_metrics,
+                monitor=monitor,
+                best_metric=best_metric,
+                stale_epochs=stale_epochs,
+                elapsed_sec=time.perf_counter() - epoch_start,
+            ),
+        )
+        if saved_best:
+            LOGGER.info("saved_best_checkpoint=%s", run_dir / "checkpoints" / "best.pt")
         if early_enabled and stale_epochs >= patience:
+            LOGGER.info(
+                "early_stopping triggered epoch=%d monitor=%s stale_epochs=%d",
+                epoch,
+                early_monitor,
+                stale_epochs,
+            )
             break
+    LOGGER.info("training_finished run_dir=%s", run_dir)
 
 
 if __name__ == "__main__":
