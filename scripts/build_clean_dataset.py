@@ -25,6 +25,7 @@ OUTPUT_FILES = (
     "sequence_meta.csv",
     "frame_meta.csv",
     "splits_by_env.json",
+    "split_index.npz",
     "clean_manifest.json",
 )
 
@@ -277,6 +278,12 @@ def ensure_output_root(output_root: Path, overwrite: bool) -> None:
     output_root.mkdir(parents=True, exist_ok=True)
 
 
+def resolve_output_root(output_root_arg: str | None, csi_root: Path) -> Path:
+    if output_root_arg:
+        return Path(output_root_arg)
+    return csi_root.parent / "clean_dataset"
+
+
 def build_splits(sequence_rows: list[dict[str, Any]]) -> dict[str, Any]:
     env_to_sequence_ids: dict[str, list[int]] = {}
     for row in sequence_rows:
@@ -310,11 +317,41 @@ def build_splits(sequence_rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def write_split_index_npz(path: Path, splits: dict[str, Any], expected_frames: int) -> None:
+    arrays: dict[str, np.ndarray] = {}
+    for env, sequence_ids in splits["env_to_sequence_ids"].items():
+        ids = np.asarray(sequence_ids, dtype=np.int32)
+        arrays[f"env_{env}_sequence_ids"] = ids
+        arrays[f"env_{env}_frame_indices"] = sequence_ids_to_frame_indices(ids, expected_frames)
+
+    for env, split in splits["leave_one_env_out"].items():
+        train_ids = np.asarray(split["train_sequence_ids"], dtype=np.int32)
+        eval_ids = np.asarray(split["eval_sequence_ids"], dtype=np.int32)
+        arrays[f"env_{env}_train_sequence_ids"] = train_ids
+        arrays[f"env_{env}_eval_sequence_ids"] = eval_ids
+        arrays[f"env_{env}_train_frame_indices"] = sequence_ids_to_frame_indices(train_ids, expected_frames)
+        arrays[f"env_{env}_eval_frame_indices"] = sequence_ids_to_frame_indices(eval_ids, expected_frames)
+
+    np.savez(path, **arrays)
+
+
+def sequence_ids_to_frame_indices(sequence_ids: np.ndarray, expected_frames: int) -> np.ndarray:
+    if sequence_ids.size == 0:
+        return np.empty((0,), dtype=np.int64)
+    offsets = sequence_ids.astype(np.int64)[:, None] * int(expected_frames)
+    frames = np.arange(int(expected_frames), dtype=np.int64)[None, :]
+    return (offsets + frames).reshape(-1)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build cleaned CSIamp and 2D GT memmaps from raw WiFiPose data.")
     parser.add_argument("--csi-root", default="/data/WiFiPose/dataset/dataset")
     parser.add_argument("--gt-root", default="/data/WiFiPose/dataset/ground_truth_npy")
-    parser.add_argument("--output-root", default="outputs/clean_dataset")
+    parser.add_argument(
+        "--output-root",
+        default=None,
+        help="Defaults to <csi-root parent>/clean_dataset, e.g. /data/WiFiPose/dataset/clean_dataset.",
+    )
     parser.add_argument("--csi-key", default="CSIamp")
     parser.add_argument("--ignored-mat-keys", default="CSIphase")
     parser.add_argument("--expected-csi-shape", default="3,114,10")
@@ -341,7 +378,7 @@ def main() -> None:
     args = parse_args()
     csi_root = Path(args.csi_root)
     gt_root = Path(args.gt_root)
-    output_root = Path(args.output_root)
+    output_root = resolve_output_root(args.output_root, csi_root)
     expected_csi_shape = parse_shape(args.expected_csi_shape)
     expected_gt_shape = parse_shape(args.expected_gt_shape)
     ignored_keys = [key.strip() for key in args.ignored_mat_keys.split(",") if key.strip()]
@@ -513,10 +550,9 @@ def main() -> None:
     )
     write_csv(output_root / "sequence_meta.csv", sequence_rows)
     write_csv(output_root / "frame_meta.csv", frame_rows)
-    (output_root / "splits_by_env.json").write_text(
-        json.dumps(build_splits(sequence_rows), indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    splits = build_splits(sequence_rows)
+    (output_root / "splits_by_env.json").write_text(json.dumps(splits, indent=2, sort_keys=True), encoding="utf-8")
+    write_split_index_npz(output_root / "split_index.npz", splits, args.expected_frames)
     manifest = {
         "generated_at_utc": now_iso(),
         "csi_root": str(csi_root),
@@ -526,6 +562,20 @@ def main() -> None:
         "ignored_mat_keys": ignored_keys,
         "x_shape": [int(v) for v in x_all.shape],
         "y_shape": [int(v) for v in y_all.shape],
+        "storage_layout": {
+            "sample_axis": "frame",
+            "x_layout": "frame,time,antenna,subcarrier",
+            "y_layout": "frame,joint,xy",
+            "meta_layout": "frame_aligned_arrays",
+            "split_index_layout": "sequence_ids_and_frame_indices_by_env",
+        },
+        "training_io": {
+            "x_file": "X_amp_clean.npy",
+            "y_file": "Y_2d_clean.npy",
+            "meta_file": "meta.npz",
+            "split_index_file": "split_index.npz",
+            "recommended_loading": "np.load(..., mmap_mode='r') for X/Y and np.load for meta/splits",
+        },
         "target_dims": "xy_2d",
         "target_range": [args.target_min, args.target_max],
         "gt_source_range": gt_range,
