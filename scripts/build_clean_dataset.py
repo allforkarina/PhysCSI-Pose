@@ -14,10 +14,12 @@ from typing import Any
 import h5py
 import numpy as np
 import scipy.io
+import scipy.signal
 
 
 GT_RE = re.compile(r"^E(?P<env>\d+)_S(?P<subject>\d+)_A(?P<action>\d+)\.npy$", re.IGNORECASE)
 OUTPUT_FILES = (
+    "X_amp_resampled.npy",
     "X_amp_clean.npy",
     "Y_2d_clean.npy",
     "repair_counts.npy",
@@ -146,7 +148,15 @@ def standardize_csiamp(frame: np.ndarray, expected_shape: tuple[int, ...], path:
         raise ValueError(f"{path} CSIamp shape expected {shape_text(expected_shape)}, got {shape_text(tuple(frame.shape))}")
     if len(expected_shape) != 3:
         raise ValueError(f"expected CSI shape must be 3D, got {expected_shape}")
-    return np.transpose(frame, (2, 0, 1)).astype(np.float32, copy=False)
+    return frame.astype(np.float32, copy=False)
+
+
+def resample_csiamp_time(frame: np.ndarray, output_time_steps: int) -> np.ndarray:
+    if frame.ndim != 3:
+        raise ValueError(f"CSIamp frame must be 3D [antenna, subcarrier, time], got {frame.shape}")
+    if output_time_steps <= 0:
+        raise ValueError(f"output_time_steps must be positive, got {output_time_steps}")
+    return scipy.signal.resample(frame, int(output_time_steps), axis=2).astype(np.float32, copy=False)
 
 
 def frame_bbox_outlier(
@@ -357,6 +367,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-csi-shape", default="3,114,10")
     parser.add_argument("--expected-gt-shape", default="297,17,3")
     parser.add_argument("--expected-frames", type=int, default=297)
+    parser.add_argument("--resample-time-steps", type=int, default=64)
     parser.add_argument("--repair-subcarrier-radius", type=int, default=2)
     parser.add_argument("--repair-time-radius", type=int, default=1)
     parser.add_argument("--target-min", type=float, default=-0.8)
@@ -418,10 +429,10 @@ def main() -> None:
         )
     progress(f"GT source range={gt_range}")
 
-    frame_shape = (expected_csi_shape[2], expected_csi_shape[0], expected_csi_shape[1])
+    frame_shape = (expected_csi_shape[0], expected_csi_shape[1], args.resample_time_steps)
     total_frames = len(sequences) * args.expected_frames
     x_all = np.lib.format.open_memmap(
-        output_root / "X_amp_clean.npy",
+        output_root / "X_amp_resampled.npy",
         mode="w+",
         dtype=np.float32,
         shape=(total_frames, *frame_shape),
@@ -484,7 +495,8 @@ def main() -> None:
                 subcarrier_radius=args.repair_subcarrier_radius,
                 time_radius=args.repair_time_radius,
             )
-            x_all[out_index] = standardize_csiamp(repaired, expected_csi_shape, path)
+            standardized = standardize_csiamp(repaired, expected_csi_shape, path)
+            x_all[out_index] = resample_csiamp_time(standardized, args.resample_time_steps)
             y_all[out_index] = y_seq[frame_zero]
             repair_counts[out_index] = min(repair_stats["nonfinite_values"], np.iinfo(np.uint16).max)
 
@@ -560,17 +572,20 @@ def main() -> None:
         "output_root": str(output_root),
         "csi_key": args.csi_key,
         "ignored_mat_keys": ignored_keys,
+        "raw_csi_shape": [int(v) for v in expected_csi_shape],
+        "resampled_csi_shape": [int(v) for v in frame_shape],
+        "resample_method": "scipy.signal.resample",
         "x_shape": [int(v) for v in x_all.shape],
         "y_shape": [int(v) for v in y_all.shape],
         "storage_layout": {
             "sample_axis": "frame",
-            "x_layout": "frame,time,antenna,subcarrier",
+            "x_layout": "sample,antenna,subcarrier,time",
             "y_layout": "frame,joint,xy",
             "meta_layout": "frame_aligned_arrays",
             "split_index_layout": "sequence_ids_and_frame_indices_by_env",
         },
         "training_io": {
-            "x_file": "X_amp_clean.npy",
+            "x_file": "X_amp_resampled.npy",
             "y_file": "Y_2d_clean.npy",
             "meta_file": "meta.npz",
             "split_index_file": "split_index.npz",
