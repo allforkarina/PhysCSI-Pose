@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+import torch
+from torch import nn
+
+from models.axial_attention import AxialAttentionEncoder
+from models.baseline_csi_pose import ResidualBlock
+from models.joint_decoder import JointQueryDecoder
+from models.wavelet_feature_bank import TemporalSWTFeatureBank
+
+
+class WaveletConcatBaseline(nn.Module):
+    def __init__(self, *, num_joints: int = 17, d_model: int = 256, wavelet: str = "db2") -> None:
+        super().__init__()
+        self.feature_bank = TemporalSWTFeatureBank(wavelet=wavelet, levels=3)
+        self.stem = nn.Sequential(
+            nn.Conv2d(15, 16, kernel_size=1),
+            nn.GELU(),
+            nn.Conv2d(16, 32, kernel_size=(5, 3), padding=(2, 1)),
+            nn.GroupNorm(8, 32),
+            nn.GELU(),
+        )
+        self.spatial_encoder = nn.Sequential(
+            ResidualBlock(32, 64, stride=(2, 2)),
+            ResidualBlock(64, 128, stride=(2, 2)),
+            ResidualBlock(128, 128, stride=(1, 1)),
+        )
+        self.axial_encoder = AxialAttentionEncoder(in_channels=128, d_model=d_model)
+        self.joint_decoder = JointQueryDecoder(num_joints=num_joints, d_model=d_model)
+        self.pose_head = nn.Sequential(
+            nn.Linear(d_model, 128),
+            nn.GELU(),
+            nn.Linear(128, 2),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.ndim != 4 or x.shape[1:] != (3, 114, 64):
+            raise ValueError(f"expected input [batch,3,114,64], got {tuple(x.shape)}")
+        features = self.feature_bank(x)
+        concat = torch.cat(list(features.values()), dim=1)
+        stem_features = self.stem(concat)
+        spatial_features = self.spatial_encoder(stem_features)
+        encoded_features = self.axial_encoder(spatial_features)
+        tokens = encoded_features.permute(0, 2, 3, 1).reshape(x.shape[0], 29 * 16, -1)
+        joint_features = self.joint_decoder(tokens)
+        return self.pose_head(joint_features)
