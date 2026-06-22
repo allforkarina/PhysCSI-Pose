@@ -4,11 +4,12 @@ import torch
 from torch import nn
 
 from models.axial_attention import AxialAttentionEncoder
+from models.h36m17_graph_refiner import H36M17GraphRefiner
 from models.joint_decoder import JointQueryDecoder
 
 
 class BaselineCSIPoseModel(nn.Module):
-    def __init__(self, *, num_joints: int = 17, d_model: int = 256) -> None:
+    def __init__(self, *, num_joints: int = 17, d_model: int = 256, use_graph_refiner: bool = False) -> None:
         super().__init__()
         self.stem = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=1),
@@ -24,6 +25,7 @@ class BaselineCSIPoseModel(nn.Module):
         )
         self.axial_encoder = AxialAttentionEncoder(in_channels=128, d_model=d_model)
         self.joint_decoder = JointQueryDecoder(num_joints=num_joints, d_model=d_model)
+        self.graph_refiner = H36M17GraphRefiner(d_model=d_model) if use_graph_refiner else None
         self.pose_head = nn.Sequential(
             nn.Linear(d_model, 128),
             nn.GELU(),
@@ -38,6 +40,8 @@ class BaselineCSIPoseModel(nn.Module):
         encoded_features = self.axial_encoder(spatial_features)
         tokens = encoded_features.permute(0, 2, 3, 1).reshape(x.shape[0], 29 * 16, -1)
         joint_features = self.joint_decoder(tokens)
+        if self.graph_refiner is not None:
+            joint_features = self.graph_refiner(joint_features)
         pose = self.pose_head(joint_features)
         if not return_intermediates:
             return pose

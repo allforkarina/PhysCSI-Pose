@@ -5,12 +5,20 @@ from torch import nn
 
 from models.axial_attention import AxialAttentionEncoder
 from models.baseline_csi_pose import ResidualBlock
+from models.h36m17_graph_refiner import H36M17GraphRefiner
 from models.joint_decoder import JointQueryDecoder
 from models.wavelet_feature_bank import TemporalSWTFeatureBank
 
 
 class WaveletConcatBaseline(nn.Module):
-    def __init__(self, *, num_joints: int = 17, d_model: int = 256, wavelet: str = "db2") -> None:
+    def __init__(
+        self,
+        *,
+        num_joints: int = 17,
+        d_model: int = 256,
+        wavelet: str = "db2",
+        use_graph_refiner: bool = False,
+    ) -> None:
         super().__init__()
         self.feature_bank = TemporalSWTFeatureBank(wavelet=wavelet, levels=3)
         self.stem = nn.Sequential(
@@ -27,6 +35,7 @@ class WaveletConcatBaseline(nn.Module):
         )
         self.axial_encoder = AxialAttentionEncoder(in_channels=128, d_model=d_model)
         self.joint_decoder = JointQueryDecoder(num_joints=num_joints, d_model=d_model)
+        self.graph_refiner = H36M17GraphRefiner(d_model=d_model) if use_graph_refiner else None
         self.pose_head = nn.Sequential(
             nn.Linear(d_model, 128),
             nn.GELU(),
@@ -43,4 +52,6 @@ class WaveletConcatBaseline(nn.Module):
         encoded_features = self.axial_encoder(spatial_features)
         tokens = encoded_features.permute(0, 2, 3, 1).reshape(x.shape[0], 29 * 16, -1)
         joint_features = self.joint_decoder(tokens)
+        if self.graph_refiner is not None:
+            joint_features = self.graph_refiner(joint_features)
         return self.pose_head(joint_features)

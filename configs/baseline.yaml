@@ -1,0 +1,34 @@
+metadata:
+  skeleton_name: human36m17
+  input_layout: antenna,subcarrier,time
+
+data:
+  x_file: X_amp_resampled.npy
+  y_file: Y_2d_clean.npy
+  normalization: train_split_only
+
+model:
+  type: baseline
+  num_joints: 17
+  d_model: 256
+  wavelet_bands:
+    - raw
+  fine_branch: false
+  gate: false
+  graph_refinement: false
+
+losses:
+  coordinate_l1: 1.0
+  bone_length: 0.1
+
+trainable_groups:
+  - all
+
+logging:
+  metrics:
+    - overall_mpjpe
+    - per_joint_mpjpe
+    - joint_group_mpjpe
+    - wrist_mpjpe
+    - ankle_mpjpe
+  diagnostics: []
