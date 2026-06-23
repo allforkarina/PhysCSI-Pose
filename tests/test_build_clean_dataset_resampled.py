@@ -142,3 +142,34 @@ def test_build_clean_dataset_uses_fixed_gt_range_by_default(tmp_path: Path) -> N
     assert manifest["gt_source_range_policy"] == "fixed"
     assert manifest["gt_source_range"]["x_min"] == -1.0
     assert manifest["gt_source_range"]["x_max"] == 1.0
+
+
+def test_build_clean_dataset_writes_source_val_and_target_test_splits(tmp_path: Path) -> None:
+    from scripts.build_clean_dataset import build_splits, write_split_index_npz
+
+    sequence_rows = [
+        {"sequence_id": 0, "env": 1},
+        {"sequence_id": 1, "env": 1},
+        {"sequence_id": 2, "env": 2},
+        {"sequence_id": 3, "env": 2},
+        {"sequence_id": 4, "env": 3},
+        {"sequence_id": 5, "env": 3},
+    ]
+    splits = build_splits(sequence_rows, source_val_fraction=0.5)
+    path = tmp_path / "split_index.npz"
+
+    write_split_index_npz(path, splits, expected_frames=2)
+    arrays = np.load(path, allow_pickle=False)
+
+    assert "env_3_source_train_frame_indices" in arrays
+    assert "env_3_source_val_frame_indices" in arrays
+    assert "env_3_target_test_frame_indices" in arrays
+    source_train = set(arrays["env_3_source_train_frame_indices"].tolist())
+    source_val = set(arrays["env_3_source_val_frame_indices"].tolist())
+    target_test = set(arrays["env_3_target_test_frame_indices"].tolist())
+    assert source_train
+    assert source_val
+    assert target_test == {8, 9, 10, 11}
+    assert source_train.isdisjoint(source_val)
+    assert source_train.isdisjoint(target_test)
+    assert source_val.isdisjoint(target_test)

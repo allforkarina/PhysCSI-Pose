@@ -294,7 +294,9 @@ def resolve_output_root(output_root_arg: str | None, csi_root: Path) -> Path:
     return csi_root.parent / "clean_dataset"
 
 
-def build_splits(sequence_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def build_splits(sequence_rows: list[dict[str, Any]], *, source_val_fraction: float = 0.2) -> dict[str, Any]:
+    if not 0.0 < source_val_fraction < 1.0:
+        raise ValueError(f"source_val_fraction must be between 0 and 1, got {source_val_fraction}")
     env_to_sequence_ids: dict[str, list[int]] = {}
     for row in sequence_rows:
         env_to_sequence_ids.setdefault(str(row["env"]), []).append(int(row["sequence_id"]))
@@ -308,6 +310,10 @@ def build_splits(sequence_rows: list[dict[str, Any]]) -> dict[str, Any]:
             for row in sequence_rows
             if int(row["env"]) in train_envs
         ]
+        train_ids = sorted(train_ids)
+        val_count = max(1, int(round(len(train_ids) * source_val_fraction))) if len(train_ids) > 1 else 0
+        source_val_ids = train_ids[-val_count:] if val_count else []
+        source_train_ids = train_ids[:-val_count] if val_count else train_ids
         eval_ids = [
             int(row["sequence_id"])
             for row in sequence_rows
@@ -315,9 +321,10 @@ def build_splits(sequence_rows: list[dict[str, Any]]) -> dict[str, Any]:
         ]
         leave_one_env_out[str(eval_env)] = {
             "train_envs": train_envs,
-            "eval_envs": [eval_env],
-            "train_sequence_ids": train_ids,
-            "eval_sequence_ids": eval_ids,
+            "target_envs": [eval_env],
+            "source_train_sequence_ids": source_train_ids,
+            "source_val_sequence_ids": source_val_ids,
+            "target_test_sequence_ids": eval_ids,
         }
 
     return {
@@ -335,12 +342,15 @@ def write_split_index_npz(path: Path, splits: dict[str, Any], expected_frames: i
         arrays[f"env_{env}_frame_indices"] = sequence_ids_to_frame_indices(ids, expected_frames)
 
     for env, split in splits["leave_one_env_out"].items():
-        train_ids = np.asarray(split["train_sequence_ids"], dtype=np.int32)
-        eval_ids = np.asarray(split["eval_sequence_ids"], dtype=np.int32)
-        arrays[f"env_{env}_train_sequence_ids"] = train_ids
-        arrays[f"env_{env}_eval_sequence_ids"] = eval_ids
-        arrays[f"env_{env}_train_frame_indices"] = sequence_ids_to_frame_indices(train_ids, expected_frames)
-        arrays[f"env_{env}_eval_frame_indices"] = sequence_ids_to_frame_indices(eval_ids, expected_frames)
+        source_train_ids = np.asarray(split["source_train_sequence_ids"], dtype=np.int32)
+        source_val_ids = np.asarray(split["source_val_sequence_ids"], dtype=np.int32)
+        target_test_ids = np.asarray(split["target_test_sequence_ids"], dtype=np.int32)
+        arrays[f"env_{env}_source_train_sequence_ids"] = source_train_ids
+        arrays[f"env_{env}_source_val_sequence_ids"] = source_val_ids
+        arrays[f"env_{env}_target_test_sequence_ids"] = target_test_ids
+        arrays[f"env_{env}_source_train_frame_indices"] = sequence_ids_to_frame_indices(source_train_ids, expected_frames)
+        arrays[f"env_{env}_source_val_frame_indices"] = sequence_ids_to_frame_indices(source_val_ids, expected_frames)
+        arrays[f"env_{env}_target_test_frame_indices"] = sequence_ids_to_frame_indices(target_test_ids, expected_frames)
 
     np.savez(path, **arrays)
 
@@ -386,6 +396,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gt-source-y-min", type=float, default=-1.0)
     parser.add_argument("--gt-source-y-max", type=float, default=1.0)
     parser.add_argument("--max-sequences", type=int, default=None)
+    parser.add_argument("--source-val-fraction", type=float, default=0.2)
     parser.add_argument("--progress-every", type=int, default=10)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -565,7 +576,7 @@ def main() -> None:
     )
     write_csv(output_root / "sequence_meta.csv", sequence_rows)
     write_csv(output_root / "frame_meta.csv", frame_rows)
-    splits = build_splits(sequence_rows)
+    splits = build_splits(sequence_rows, source_val_fraction=args.source_val_fraction)
     (output_root / "splits_by_env.json").write_text(json.dumps(splits, indent=2, sort_keys=True), encoding="utf-8")
     write_split_index_npz(output_root / "split_index.npz", splits, args.expected_frames)
     manifest = {
