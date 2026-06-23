@@ -1,0 +1,34 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local environment files
+.venv/
+venv/
+env/
+*.env
+.env*
+
+# Dataset and model artifacts
+datasets/
+*.h5
+*.hdf5
+*.npy
+*.npz
+checkpoints/
+runs/
+outputs/
+*.pt
+*.pth
+*.ckpt
+
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
