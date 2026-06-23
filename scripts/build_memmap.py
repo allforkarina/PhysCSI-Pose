@@ -122,14 +122,16 @@ def process_trial(
         gt_filename = f"E{env_num:02d}_{subject}_{action}.npy"
         gt_path = gt_dir / gt_filename
         if not gt_path.exists():
-            print(f"  WARNING: GT file {gt_filename} not found, zero-filling keypoints")
-            keypoints = np.zeros((n_frames, 17, 2), dtype=np.float32)
-        else:
-            gt_xy = extract_h36m17_xy(np.load(str(gt_path)), source=gt_filename)
-            gt_n = gt_xy.shape[0]
-            keypoints = np.zeros((n_frames, 17, 2), dtype=np.float32)
-            common_n = min(n_frames, gt_n)
-            keypoints[:common_n] = gt_xy[:common_n]
+            raise FileNotFoundError(f"Missing GT file for {action}/{subject}: {gt_path}")
+
+        gt_xy = extract_h36m17_xy(np.load(str(gt_path)), source=gt_filename)
+        gt_n = gt_xy.shape[0]
+        if gt_n != n_frames:
+            raise ValueError(
+                f"CSI/GT frame count mismatch for {action}/{subject}: "
+                f"{len(mat_paths)} CSI frames vs {gt_n} GT frames ({gt_filename})"
+            )
+        keypoints = gt_xy
     else:
         rgb_dir = trial_dir / "rgb"
         npy_paths = sorted(rgb_dir.glob("frame*.npy"))
@@ -230,6 +232,12 @@ def main():
 
     dt = time.time() - t0
     print(f"\nPhase 1: {len(all_data)} ok, {len(failures)} fail ({dt:.1f}s)")
+    if failures:
+        print("ERROR: At least one trial failed; aborting before writing memmap files.")
+        for label, err in failures:
+            print(f"\n--- {label} ---")
+            print(err.rstrip())
+        sys.exit(1)
     if not all_data:
         print("ERROR: No trials processed")
         sys.exit(1)

@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 import scipy.io
 import torch
 
@@ -12,16 +13,20 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+def _write_csi_frame(trial_dir: Path, frame: int) -> None:
+    wifi_dir = trial_dir / "wifi-csi"
+    wifi_dir.mkdir(parents=True, exist_ok=True)
+    scipy.io.savemat(
+        wifi_dir / f"frame{frame:03d}.mat",
+        {"CSIamp": np.ones((3, 114, 10), dtype=np.float32)},
+    )
+
+
 def test_build_memmap_preserves_h36m17_xy_order_and_raw_coordinate_range(tmp_path: Path) -> None:
     from scripts.build_memmap import process_trial
 
     csi_trial = tmp_path / "dataset" / "A09" / "S34"
-    wifi_dir = csi_trial / "wifi-csi"
-    wifi_dir.mkdir(parents=True)
-    scipy.io.savemat(
-        wifi_dir / "frame001.mat",
-        {"CSIamp": np.ones((3, 114, 10), dtype=np.float32)},
-    )
+    _write_csi_frame(csi_trial, 1)
 
     gt_dir = tmp_path / "ground_truth_npy"
     gt_dir.mkdir()
@@ -38,6 +43,73 @@ def test_build_memmap_preserves_h36m17_xy_order_and_raw_coordinate_range(tmp_pat
     np.testing.assert_allclose(result["keypoints"][0], gt[0, :, :2])
     assert result["keypoints"][0, :, 0].max() > 0.8
     assert result["keypoints"][0, :, 0].min() < -0.8
+
+
+def test_build_memmap_fails_when_h36m17_gt_file_is_missing(tmp_path: Path) -> None:
+    from scripts.build_memmap import process_trial
+
+    csi_trial = tmp_path / "dataset" / "A09" / "S34"
+    _write_csi_frame(csi_trial, 1)
+    gt_dir = tmp_path / "ground_truth_npy"
+    gt_dir.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="E04_S34_A09.npy"):
+        process_trial(csi_trial, pose_min=-0.8, pose_max=0.8, gt_dir=gt_dir)
+
+
+def test_build_memmap_fails_when_csi_and_gt_frame_counts_differ(tmp_path: Path) -> None:
+    from scripts.build_memmap import process_trial
+
+    csi_trial = tmp_path / "dataset" / "A09" / "S34"
+    _write_csi_frame(csi_trial, 1)
+    _write_csi_frame(csi_trial, 2)
+
+    gt_dir = tmp_path / "ground_truth_npy"
+    gt_dir.mkdir()
+    gt = np.ones((1, 17, 3), dtype=np.float32)
+    np.save(gt_dir / "E04_S34_A09.npy", gt)
+
+    with pytest.raises(ValueError, match="frame count mismatch"):
+        process_trial(csi_trial, pose_min=-0.8, pose_max=0.8, gt_dir=gt_dir)
+
+
+def test_build_memmap_main_exits_if_any_worker_trial_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.build_memmap import main
+
+    src_root = tmp_path / "dataset"
+    gt_dir = tmp_path / "ground_truth_npy"
+    dst_root = tmp_path / "memmap"
+    good_trial = src_root / "A09" / "S31"
+    missing_gt_trial = src_root / "A09" / "S32"
+    _write_csi_frame(good_trial, 1)
+    _write_csi_frame(missing_gt_trial, 1)
+    gt_dir.mkdir()
+    gt = np.ones((1, 17, 3), dtype=np.float32)
+    np.save(gt_dir / "E04_S31_A09.npy", gt)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "build_memmap.py",
+            "--src",
+            str(src_root),
+            "--dst",
+            str(dst_root),
+            "--gt-dir",
+            str(gt_dir),
+            "--train-subjects",
+            "S31",
+            "S32",
+            "--workers",
+            "2",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+
+    assert excinfo.value.code == 1
+    assert not (dst_root / "ground_truth.npy").exists()
 
 
 def test_memmap_dataset_and_collate_expose_keypoints_as_h36m17(tmp_path: Path) -> None:
