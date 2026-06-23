@@ -1,8 +1,0 @@
-numpy
-scipy
-h5py
-pyyaml
-pytest
-torch
-matplotlib
-PyWavelets
