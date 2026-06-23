@@ -85,6 +85,8 @@ python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\train\best_val
 
 `eval.py` evaluates `--eval-split test` by default. Use `--eval-split all` only when you intentionally evaluate a full environment subset, such as target-domain few-shot evaluation with excluded training frames.
 
+Source-only runs first filter by `--source-envs`, then split subjects inside those environments into train/val/test. A subject's actions, trials, and frames must stay in exactly one split; never split one subject's frames across train/val/test.
+
 ### Cross-Domain Few-Shot Finetune Pipeline
 
 ```powershell

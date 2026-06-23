@@ -32,6 +32,9 @@ def create_memmap_data_loader(
     split: str,
     batch_size: int,
     envs: tuple[str, ...] | None = None,
+    train_subjects: tuple[str, ...] | None = None,
+    val_subjects: tuple[str, ...] | None = None,
+    test_subjects: tuple[str, ...] | None = None,
     num_workers: int = 0,
     shuffle: bool | None = None,
     seed: int = 42,
@@ -43,6 +46,9 @@ def create_memmap_data_loader(
         data_dir=data_dir,
         split=split,
         envs=envs,
+        train_subjects=train_subjects,
+        val_subjects=val_subjects,
+        test_subjects=test_subjects,
         seed=seed,
     )
     should_shuffle = shuffle if shuffle is not None else split in ("train", "all")
@@ -60,6 +66,10 @@ def create_memmap_data_loader(
 def create_memmap_data_loaders(
     data_dir: str | Path,
     batch_size: int,
+    envs: tuple[str, ...] | None = None,
+    train_subjects: tuple[str, ...] | None = None,
+    val_subjects: tuple[str, ...] | None = None,
+    test_subjects: tuple[str, ...] | None = None,
     num_workers: int = 0,
     seed: int = 42,
 ) -> dict[str, DataLoader]:
@@ -68,6 +78,10 @@ def create_memmap_data_loaders(
             data_dir=data_dir,
             split=split,
             batch_size=batch_size,
+            envs=envs,
+            train_subjects=train_subjects,
+            val_subjects=val_subjects,
+            test_subjects=test_subjects,
             num_workers=num_workers,
             seed=seed,
         )

@@ -32,6 +32,7 @@ class MemmapDataset(Dataset):
         split: str = "train",
         envs: Iterable[str] | None = None,
         train_subjects: Iterable[str] | None = None,
+        val_subjects: Iterable[str] | None = None,
         test_subjects: Iterable[str] | None = None,
         random_val_ratio: float = 0.2,
         random_test_ratio: float = 0.2,
@@ -58,7 +59,14 @@ class MemmapDataset(Dataset):
         self._actions = meta["action"]
 
         self.indices = self._build_split(
-            split, envs, train_subjects, test_subjects, random_val_ratio, random_test_ratio, seed
+            split,
+            envs,
+            train_subjects,
+            val_subjects,
+            test_subjects,
+            random_val_ratio,
+            random_test_ratio,
+            seed,
         )
 
     def _build_split(
@@ -66,6 +74,7 @@ class MemmapDataset(Dataset):
         split: str,
         envs: Iterable[str] | None,
         train_subjects: Iterable[str] | None,
+        val_subjects: Iterable[str] | None,
         test_subjects: Iterable[str] | None,
         random_val_ratio: float,
         random_test_ratio: float,
@@ -76,12 +85,12 @@ class MemmapDataset(Dataset):
         sample_list = [str(s) for s in self._samples]
 
         env_set = set(envs) if envs else None
-        if split == "test" and test_subjects is not None:
-            subject_set = set(test_subjects)
-        elif split in {"train", "val"} and train_subjects is not None:
-            subject_set = set(train_subjects)
-        else:
-            subject_set = None
+        explicit_subjects = {
+            "train": set(train_subjects) if train_subjects is not None else None,
+            "val": set(val_subjects) if val_subjects is not None else None,
+            "test": set(test_subjects) if test_subjects is not None else None,
+        }
+        subject_set = explicit_subjects.get(split)
 
         candidate_indices: list[int] = []
         for i in range(num_total):
@@ -92,24 +101,36 @@ class MemmapDataset(Dataset):
             candidate_indices.append(i)
 
         if split != "all":
+            if subject_set is not None:
+                return np.asarray(sorted(candidate_indices), dtype=np.int64)
+
             rng = random.Random(seed)
             grouped: dict[str, list[int]] = {}
             for idx in candidate_indices:
                 grouped.setdefault(sample_list[idx], []).append(idx)
 
+            subjects = sorted(grouped)
+            rng.shuffle(subjects)
+            n_subjects = len(subjects)
+            test_count = min(n_subjects, int(round(n_subjects * random_test_ratio)))
+            val_count = min(n_subjects - test_count, int(round(n_subjects * random_val_ratio)))
+            train_count = n_subjects - val_count - test_count
+            split_subjects = {
+                "train": set(subjects[:train_count]),
+                "val": set(subjects[train_count:train_count + val_count]),
+                "test": set(subjects[train_count + val_count:]),
+            }
+
             train_indices: list[int] = []
             val_indices: list[int] = []
             test_indices: list[int] = []
-            for subject, indices in sorted(grouped.items()):
-                shuffled = indices[:]
-                rng.shuffle(shuffled)
-                n = len(shuffled)
-                test_count = min(n, int(round(n * random_test_ratio)))
-                val_count = min(n - test_count, int(round(n * random_val_ratio)))
-                train_count = n - val_count - test_count
-                train_indices.extend(shuffled[:train_count])
-                val_indices.extend(shuffled[train_count:train_count + val_count])
-                test_indices.extend(shuffled[train_count + val_count:])
+            for subject, indices in grouped.items():
+                if subject in split_subjects["train"]:
+                    train_indices.extend(indices)
+                elif subject in split_subjects["val"]:
+                    val_indices.extend(indices)
+                elif subject in split_subjects["test"]:
+                    test_indices.extend(indices)
 
             if split == "train":
                 return np.asarray(sorted(train_indices), dtype=np.int64)

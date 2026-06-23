@@ -29,6 +29,7 @@ python train.py --mode source_only --dataset-root data\mmfi_pose --epochs 50 --b
 # Evaluate
 python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\train\best_val_mpjpe.pth --output-dir outputs\eval
 # eval.py defaults to --eval-split test; use --eval-split all only for explicit full-subset evaluation.
+# Source-only split protocol: filter source envs first, then split whole subjects into train/val/test.
 
 # Few-shot cross-domain
 python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --output-dir outputs\source --epochs 50
