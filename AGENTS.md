@@ -2,10 +2,10 @@
 
 ## Project Structure & Module Organization
 - `dataloader.py`: Core module for loading NPY memmap datasets, creating PyTorch `DataLoader` instances with `memmap_collate_fn`, and providing `create_memmap_data_loader` / `create_memmap_data_loaders` / `create_few_shot_data_loader` factory functions.
-- `data/memmap_dataset.py`: NPY memmap dataset reader that loads CSI amplitude, OpenPose18 keypoints, and metadata from `.npy`/`.npz` files with zero-copy OS-cached I/O.
-- `data/heatmap_gt.py`: OpenPose18 coordinate conversion utilities (coco17_to_openpose18, valid_point).
+- `data/memmap_dataset.py`: NPY memmap dataset reader that loads CSI amplitude, Human3.6M-17 keypoints, and metadata from `.npy`/`.npz` files with zero-copy OS-cached I/O.
+- `data/heatmap_gt.py`: Human3.6M-17 coordinate validation/extraction utilities (`extract_h36m17_xy`, `valid_point`).
 - `pose_targets.py`: Reserved for future pose target utilities.
-- `models/`: PyTorch model code, including the full WiFlow model, CSI spatial encoder with symmetric spatio-temporal downsampling, axial attention encoder, multi-layer joint cross-attention decoder, hierarchical joint decoder ablation, and shared OpenPose18 skeleton topology. The active single-frame model path is CSI amplitude input -> spatial encoder with antenna mixing, feature stem, and symmetric time-frequency residual blocks -> axial encoder -> the configured decoder.
+- `models/`: PyTorch model code, including the full WiFlow model, CSI spatial encoder with symmetric spatio-temporal downsampling, axial attention encoder, multi-layer joint cross-attention decoder, hierarchical joint decoder ablation, and shared Human3.6M-17 skeleton topology. The active single-frame model path is CSI amplitude input -> spatial encoder with antenna mixing, feature stem, and symmetric time-frequency residual blocks -> axial encoder -> the configured decoder.
 - `train.py`: Root-level training entrypoint for WiFlow pose regression, including losses, metrics, optimizer, scheduler, checkpointing, and CSV logging. Supports `--mode source_only` (single-domain training), `--mode finetune` (cross-domain few-shot finetuning with explicit `--trainable-groups` ablations such as encoder-only, decoder-only, and full finetuning), and `--mode finetune_align` (source/target supervised finetuning with explicit CORAL domain alignment on axial CSI features).
 - `eval.py`: Root-level evaluation entrypoint for loading checkpoints, computing test metrics, and optionally generating research-grade feature visualizations via `--feature-viz`. Supports `--eval-envs` (environment filtering) and `--exclude-indices` (exclude few-shot training frames).
 - `evaluation/`: Evaluation pipeline package.
@@ -24,7 +24,7 @@ Generated datasets can be large and should not be committed. Keep raw dataset ro
 ## Project Domain Knowledge
 - One CSI sample is a physical signal tensor shaped `64 time steps x 3 antennas x 114 subcarriers` in the NPY memmap dataset. The model input is `[B, 3, 114, 64]` (channels-first). The subcarrier axis carries spatial-frequency response, the antenna axis carries spatial phase-difference and direction information, and the temporal axis (64 steps, upsampled from 10 original time shots) carries motion cues such as Doppler effects.
 - Only CSI amplitude is used as input (3 channels, one per antenna). Phase information is not used.
-- The target pose is the structured OpenPose18 keypoint set (18 joints including neck). The 18 joints are not independent coordinates; they are constrained by the human skeleton topology (19 bone edges).
+- The target pose is the structured Human3.6M-17 keypoint set. GT is already in standard Human3.6M order and must not be converted to OpenPose. The 17 joints are constrained by the Human3.6M skeleton topology.
 - The central modeling gap is that CSI is a low-resolution, high-noise, implicit sensing signal, while pose regression needs precise coordinates. Strong skeleton priors are important for bridging that gap.
 - Preserve CSI physical dimension semantics where practical. Avoid arbitrary flattening or pooling that mixes antenna, subcarrier, and temporal meanings before the model has selected useful information.
 - Prefer attention-based information selection over destructive pooling for low-SNR CSI features, and use structured supervision such as bone or topology-aware losses in addition to coordinate losses.
@@ -126,7 +126,7 @@ python train.py --mode finetune_align --dataset-root data\mmfi_pose --source-env
 
 Supported `--align-loss` values are `none` and `coral`; supported `--align-layer` is currently `axial`. Sweep `--align-weight` for the D4 control, for example `0.01`, `0.05`, `0.1`, and `0.5`, while keeping dataset split, seed, optimizer, scheduler, trainable groups, and few-shot indices matched. Report target MPJPE, PCK@0.2, per-action/per-joint errors, and `eval.py --feature-viz` evidence showing whether axial feature distributions align without collapsing pose-relevant structure.
 
-Run lower-limb weighted coordinate-loss ablations when per-joint diagnostics show hip/knee/ankle predictions have low `std_ratio` or high `mean_pose_dist` after cross-domain finetuning. The preset keeps the original loss as the default (`--joint-loss-preset uniform`) and only upweights OpenPose18 hip/knee/ankle joints when explicitly enabled:
+Run lower-limb weighted coordinate-loss ablations when per-joint diagnostics show hip/knee/ankle predictions have low `std_ratio` or high `mean_pose_dist` after cross-domain finetuning. The preset keeps the original loss as the default (`--joint-loss-preset uniform`) and only upweights Human3.6M-17 hip/knee/ankle joints when explicitly enabled:
 
 ```powershell
 # Lower-limb endpoint supervision: test whether hip/knee/ankle errors are underweighted
@@ -136,12 +136,12 @@ python train.py --mode finetune --dataset-root data\mmfi_pose --target-envs env2
 Sweep `--lower-limb-weight` conservatively, starting with `1.5` and `2.0`. Compare against the matched `uniform` finetune with the same source checkpoint, target environment, few-shot subjects/frames, seed, optimizer, scheduler, and trainable groups. After each run, inspect `per_joint_metrics.csv` and `per_joint_diagnostic.csv`; a useful result should improve lower-limb PCK/MPJPE while keeping overall `var_ratio` and lower-limb `std_ratio` from dropping toward mean-pose collapse.
 
 ## Coding Style & Naming Conventions
-Use Python 3.10+ syntax, type hints, and `pathlib.Path` for paths. Group imports as standard library, third-party, then local. Follow existing naming: `snake_case` functions/variables, `PascalCase` classes, and uppercase constants such as `NUM_OPENPOSE_KEYPOINTS`. Use 4-space indentation. Keep comments focused on dataset assumptions, shapes, and normalization.
+Use Python 3.10+ syntax, type hints, and `pathlib.Path` for paths. Group imports as standard library, third-party, then local. Follow existing naming: `snake_case` functions/variables, `PascalCase` classes, and uppercase constants such as `NUM_H36M_KEYPOINTS`. Use 4-space indentation. Keep comments focused on dataset assumptions, shapes, and normalization.
 
 ## Testing Guidelines
 Automated tests use `pytest`. Add tests for split generation, path validation, shape validation, normalization edge cases, model shape contracts, and memmap dataset loading. Name files `test_*.py` and tests `test_<behavior>()`. Use temporary directories and tiny synthetic fixtures.
 
-Training and evaluation outputs are written under `outputs/` by default. Checkpoints include `best_val_mpjpe.pth`, `best_val_pck_0_2.pth`, and `last.pth`; epoch metrics are appended to `train_log.csv`. Evaluation visualizations are saved as `.png` files grouped by action/environment samples. `eval.py` also writes `per_joint_diagnostic.csv` with OpenPose18 joint names, joint groups, prediction/ground-truth std, std ratio, variance ratio, and mean-pose distance; use it to test whether distal limb joints collapse to low-variance predictions after cross-domain finetuning.
+Training and evaluation outputs are written under `outputs/` by default. Checkpoints include `best_val_mpjpe.pth`, `best_val_pck_0_2.pth`, and `last.pth`; epoch metrics are appended to `train_log.csv`. Evaluation visualizations are saved as `.png` files grouped by action/environment samples. `eval.py` also writes `per_joint_diagnostic.csv` with Human3.6M-17 joint names, joint groups, prediction/ground-truth std, std ratio, variance ratio, and mean-pose distance; use it to test whether distal limb joints collapse to low-variance predictions after cross-domain finetuning.
 
 ## Commit & Pull Request Guidelines
 This checkout has no `.git` history, so no convention can be inferred. Use concise imperative commits, for example `Add NPY memmap dataset support`. Pull requests should include a summary, commands run, dataset assumptions, and relevant shape or frame-count output. Do not commit generated datasets, virtual environments, or machine-specific paths.

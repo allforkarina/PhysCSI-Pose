@@ -62,19 +62,19 @@ class TinyAlignmentModel(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.encoder = nn.Linear(2, 2, bias=False)
-        self.decoder = nn.Linear(2, 36, bias=False)
+        self.decoder = nn.Linear(2, 34, bias=False)
 
     def encode_features(self, x: torch.Tensor) -> torch.Tensor:
         return self.encoder(x)
 
     def decode_features(self, x: torch.Tensor) -> torch.Tensor:
-        return self.decoder(x).view(x.shape[0], 18, 2)
+        return self.decoder(x).view(x.shape[0], 17, 2)
 
 
 def _tiny_batch(values: torch.Tensor) -> dict:
     return {
         "csi_amplitude": values,
-        "keypoints": torch.zeros(values.shape[0], 18, 2),
+        "keypoints": torch.zeros(values.shape[0], 17, 2),
     }
 
 

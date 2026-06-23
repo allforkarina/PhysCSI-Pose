@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from .skeleton import NUM_OPENPOSE_KEYPOINTS, build_normalized_adjacency
+from .skeleton import NUM_POSE_KEYPOINTS, build_normalized_adjacency
 
 
 class WiFlowJointCrossAttentionLayer(nn.Module):
@@ -40,13 +40,13 @@ class WiFlowJointCrossAttentionLayer(nn.Module):
 
 
 class WiFlowJointDecoder(nn.Module):
-    """Decode OpenPose18 coordinates from [B, 256, 29, 16] feature maps."""
+    """Decode Human3.6M-17 coordinates from [B, 256, 29, 16] feature maps."""
 
     def __init__(self, num_layers: int = 3) -> None:
         super().__init__()
         if num_layers < 1:
             raise ValueError("num_layers must be at least 1")
-        self.num_queries = NUM_OPENPOSE_KEYPOINTS
+        self.num_queries = NUM_POSE_KEYPOINTS
         self.embedding_dim = 256
         self.num_layers = num_layers
         self.num_heads = 4

@@ -13,8 +13,8 @@ from train import JOINT_LOSS_PRESETS, compute_losses, parse_args
 
 
 def test_uniform_joint_loss_matches_original_l1_coordinate_loss() -> None:
-    prediction = torch.zeros(2, 18, 2)
-    target = torch.randn(2, 18, 2)
+    prediction = torch.zeros(2, 17, 2)
+    target = torch.randn(2, 17, 2)
 
     losses = compute_losses(
         prediction,
@@ -29,9 +29,9 @@ def test_uniform_joint_loss_matches_original_l1_coordinate_loss() -> None:
 
 
 def test_lower_limb_weighted_loss_emphasizes_lower_limb_errors() -> None:
-    target = torch.zeros(1, 18, 2)
-    prediction = torch.zeros(1, 18, 2)
-    prediction[:, 10, :] = 1.0
+    target = torch.zeros(1, 17, 2)
+    prediction = torch.zeros(1, 17, 2)
+    prediction[:, 3, :] = 1.0
 
     uniform = compute_losses(
         prediction,
@@ -52,8 +52,8 @@ def test_lower_limb_weighted_loss_emphasizes_lower_limb_errors() -> None:
 
 
 def test_lower_limb_weight_one_keeps_original_loss_scale() -> None:
-    prediction = torch.randn(2, 18, 2)
-    target = torch.randn(2, 18, 2)
+    prediction = torch.randn(2, 17, 2)
+    target = torch.randn(2, 17, 2)
 
     uniform = compute_losses(
         prediction,

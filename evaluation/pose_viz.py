@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader, Subset
 
 from data.memmap_dataset import MemmapDataset
 from dataloader import memmap_collate_fn
+from models import H36M17_BONE_EDGES, NUM_H36M_KEYPOINTS
 from train import extract_prediction_keypoints, prepare_model_input
 
 # ---------------------------------------------------------------------------
@@ -31,16 +32,7 @@ FONT_FAMILY = "DejaVu Sans"
 JOINT_COLORS = [
     "#E6194B", "#3CB44B", "#FFE119", "#4363D8", "#F58231", "#911EB4",
     "#46F0F0", "#F032E6", "#BCF60C", "#FABEBE", "#008080", "#E6BEFF",
-    "#9A6324", "#FFFAC8", "#800000", "#AAFFC3", "#808000", "#FFD8B1",
-]
-
-BONE_EDGES: list[tuple[int, int]] = [
-    (4, 7), (7, 3),
-    (3, 9), (3, 6), (3, 11),
-    (9, 13), (13, 10), (11, 8), (8, 12),
-    (6, 0),
-    (0, 15), (0, 16),
-    (15, 14), (14, 17), (16, 5), (5, 1), (1, 2),
+    "#9A6324", "#FFFAC8", "#800000", "#AAFFC3", "#808000",
 ]
 
 plt.rcParams.update({
@@ -111,7 +103,7 @@ def _compute_axes_limits(
 def _draw_scatter(ax: plt.Axes, target: np.ndarray, prediction: np.ndarray) -> None:
     """Draw GT (hollow) and prediction (filled) joint scatter on *ax*."""
     # error vectors
-    for j in range(18):
+    for j in range(NUM_H36M_KEYPOINTS):
         ax.plot(
             [target[j, 0], prediction[j, 0]],
             [target[j, 1], prediction[j, 1]],
@@ -119,7 +111,7 @@ def _draw_scatter(ax: plt.Axes, target: np.ndarray, prediction: np.ndarray) -> N
         )
 
     # GT: dashed hollow circles
-    for j in range(18):
+    for j in range(NUM_H36M_KEYPOINTS):
         ax.scatter(
             target[j, 0], target[j, 1],
             facecolors="none",
@@ -129,7 +121,7 @@ def _draw_scatter(ax: plt.Axes, target: np.ndarray, prediction: np.ndarray) -> N
         )
 
     # Prediction: filled circles with dark border
-    for j in range(18):
+    for j in range(NUM_H36M_KEYPOINTS):
         ax.scatter(
             prediction[j, 0], prediction[j, 1],
             facecolors=JOINT_COLORS[j],
@@ -173,7 +165,7 @@ def _draw_skeleton(
         If True, joint circles are hollow (GT style); otherwise filled (Pred style).
     """
     # bones
-    for i, j in BONE_EDGES:
+    for i, j in H36M17_BONE_EDGES:
         ax.plot(
             [keypoints[i, 0], keypoints[j, 0]],
             [keypoints[i, 1], keypoints[j, 1]],
@@ -182,7 +174,7 @@ def _draw_skeleton(
         )
 
     # joints
-    for j in range(18):
+    for j in range(NUM_H36M_KEYPOINTS):
         if hollow:
             ax.scatter(
                 keypoints[j, 0], keypoints[j, 1],

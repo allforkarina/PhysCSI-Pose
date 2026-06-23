@@ -17,7 +17,7 @@ ALL_SPLITS = ("train", "val", "test", "all")
 def memmap_collate_fn(batch: list[dict]) -> dict:
     csi = torch.stack([item["csi"] for item in batch])
     csi = csi.permute(0, 2, 3, 1).contiguous()
-    keypoints = torch.stack([item["kpts18"] for item in batch])
+    keypoints = torch.stack([item["keypoints"] for item in batch])
     return {
         "csi_amplitude": csi,
         "keypoints": keypoints,

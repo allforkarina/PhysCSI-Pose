@@ -1,7 +1,7 @@
 """
-Visualize a single frame of OpenPose18 ground truth keypoints.
+Visualize a single frame of Human3.6M-17 ground truth keypoints.
 
-Displays all 18 joints with index labels and (x, y) coordinates.
+Displays all 17 joints with index labels and (x, y) coordinates.
 Draws skeleton edges between connected joints for visual context.
 
 Usage:
@@ -19,41 +19,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from models.skeleton import NUM_OPENPOSE_KEYPOINTS, OPENPOSE_BONE_EDGES
+from models.skeleton import H36M17_BONE_EDGES, H36M17_JOINT_NAMES, NUM_H36M_KEYPOINTS
 
 matplotlib.use("TkAgg")
 
-JOINT_NAMES = [
-    "Nose(0)",
-    "Neck(1)",
-    "R_Shoulder(2)",
-    "R_Elbow(3)",
-    "R_Wrist(4)",
-    "L_Shoulder(5)",
-    "L_Elbow(6)",
-    "L_Wrist(7)",
-    "R_Hip(8)",
-    "R_Knee(9)",
-    "R_Ankle(10)",
-    "L_Hip(11)",
-    "L_Knee(12)",
-    "L_Ankle(13)",
-    "R_Eye(14)",
-    "L_Eye(15)",
-    "R_Ear(16)",
-    "L_Ear(17)",
-]
+JOINT_NAMES = [f"{name}({idx})" for idx, name in enumerate(H36M17_JOINT_NAMES)]
 
 JOINT_COLORS = [
     "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231",
     "#911eb4", "#42d4f4", "#f032e6", "#bfef45", "#fabed4",
     "#469990", "#dcbeff", "#9a6324", "#fffac8", "#800000",
-    "#aaffc3", "#808000", "#ffd8b1",
+    "#aaffc3", "#808000",
 ]
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize OpenPose18 GT keypoints")
+    parser = argparse.ArgumentParser(description="Visualize Human3.6M-17 GT keypoints")
     parser.add_argument("--gt", default="data/gt_merged/ground_truth.npy")
     parser.add_argument("--frame", type=int, default=0)
     parser.add_argument("--output", default=None, help="Save to file instead of showing")
@@ -76,12 +57,12 @@ def main():
 
     valid_mask = ~(np.all(np.isclose(kpts, 0.0), axis=-1))
     n_valid = int(valid_mask.sum())
-    print(f"Frame {args.frame}: {n_valid}/{NUM_OPENPOSE_KEYPOINTS} joints valid")
+    print(f"Frame {args.frame}: {n_valid}/{NUM_H36M_KEYPOINTS} joints valid")
 
     fig, ax = plt.subplots(1, 1, figsize=(12, 10))
     ax.set_facecolor("#0a0a1a")
 
-    for i in range(NUM_OPENPOSE_KEYPOINTS):
+    for i in range(NUM_H36M_KEYPOINTS):
         x, y = kpts[i]
         color = JOINT_COLORS[i]
         ax.scatter(x, y, c=color, s=120, edgecolors="white", linewidths=1.0, zorder=5)
@@ -98,7 +79,7 @@ def main():
         )
 
     if not args.no_bones:
-        for start, end in OPENPOSE_BONE_EDGES:
+        for start, end in H36M17_BONE_EDGES:
             if valid_mask[start] and valid_mask[end]:
                 ax.plot(
                     [kpts[start, 0], kpts[end, 0]],
@@ -124,7 +105,7 @@ def main():
 
     ax.set_aspect("equal")
     ax.set_title(
-        f"OpenPose18 Ground Truth — Frame {args.frame} ({n_valid}/18 joints)",
+        f"Human3.6M-17 Ground Truth - Frame {args.frame} ({n_valid}/17 joints)",
         fontsize=14,
         fontweight="bold",
         color="white",

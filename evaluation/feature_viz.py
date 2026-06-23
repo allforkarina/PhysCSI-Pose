@@ -30,7 +30,7 @@ from sklearn.manifold import TSNE
 from torch.utils.data import DataLoader
 
 from evaluation.hooks import wiflow_hooks
-from models import NUM_OPENPOSE_KEYPOINTS, OPENPOSE_BONE_EDGES, WiFlowModel
+from models import H36M17_JOINT_NAMES, NUM_H36M_KEYPOINTS, WiFlowModel
 from train import extract_prediction_keypoints, prepare_model_input
 
 # ---------------------------------------------------------------------------
@@ -45,17 +45,12 @@ _ANATOMY_COLORS = {
     "lower":  "#378ADD",
 }
 _ANATOMY_GROUPS = {
-    "head":   [0, 1, 14, 15, 16, 17],
-    "upper":  [2, 3, 4, 5, 6, 7],
-    "trunk":  [8, 11],
-    "lower":  [9, 10, 12, 13],
+    "head":   [9, 10],
+    "upper":  [11, 12, 13, 14, 15, 16],
+    "trunk":  [0, 7, 8],
+    "lower":  [1, 2, 3, 4, 5, 6],
 }
-_JOINT_NAMES = [
-    "Nose", "Neck", "RSh", "RElb", "RWr",
-    "LSh", "LElb", "LWr", "RHip", "RKnee",
-    "RAnk", "LHip", "LKnee", "LAnk", "REye",
-    "LEye", "REar", "LEar",
-]
+_JOINT_NAMES = tuple(name.replace("_", " ").title() for name in H36M17_JOINT_NAMES)
 
 _GLOBAL_SPACING = dict(
     hspace=0.55, wspace=0.42,
@@ -83,7 +78,7 @@ _FIGURE_GUIDES = {
         "For encoder-only fine-tuning, this should remain stable if decoder priors are preserved."
     ),
     "fig6": (
-        "What this shows: Pearson correlation between encoder tokens and each OpenPose18 joint coordinate. "
+        "What this shows: Pearson correlation between encoder tokens and each Human3.6M-17 joint coordinate. "
         "Stronger localized absolute correlation after fine-tuning supports better alignment between CSI features and pose targets."
     ),
 }
@@ -536,7 +531,7 @@ def _fig4_joint_query_trajectory(
         tensor = hook_ctx.get(key)
         if tensor is None or not isinstance(tensor, torch.Tensor):
             break
-        layer_queries.append(tensor[0].cpu().numpy())  # [18, 256]
+        layer_queries.append(tensor[0].cpu().numpy())  # [17, 256]
         layer_idx += 1
 
     L = len(layer_queries)
@@ -548,9 +543,9 @@ def _fig4_joint_query_trajectory(
     fig, axes = plt.subplots(2, ncols, figsize=_figure_size(20, 11.0))
 
     # --- t-SNE ---
-    all_q = np.concatenate(layer_queries, axis=0)  # [18*L, 256]
+    all_q = np.concatenate(layer_queries, axis=0)  # [17*L, 256]
     tsne = TSNE(n_components=2, perplexity=5, random_state=42)
-    all_tsne = tsne.fit_transform(all_q)  # [18*L, 2]
+    all_tsne = tsne.fit_transform(all_q)  # [17*L, 2]
 
     # global range with 10% margin
     global_min = all_tsne.min(axis=0) - 0.1 * (all_tsne.max(axis=0) - all_tsne.min(axis=0))
@@ -558,7 +553,7 @@ def _fig4_joint_query_trajectory(
 
     for l in range(L):
         ax = axes[0, l]
-        pts = all_tsne[l * 18:(l + 1) * 18]
+        pts = all_tsne[l * NUM_H36M_KEYPOINTS:(l + 1) * NUM_H36M_KEYPOINTS]
         for group_name, indices in _ANATOMY_GROUPS.items():
             color = _ANATOMY_COLORS[group_name]
             ax.scatter(
@@ -567,7 +562,7 @@ def _fig4_joint_query_trajectory(
                 label=group_name,
             )
         # joint index labels
-        for j in range(18):
+        for j in range(NUM_H36M_KEYPOINTS):
             ax.annotate(
                 str(j), (pts[j, 0], pts[j, 1]),
                 fontsize=8, alpha=0.7,
@@ -592,16 +587,17 @@ def _fig4_joint_query_trajectory(
     # --- cosine similarity ---
     for l in range(L):
         ax = axes[1, l]
-        q = layer_queries[l].astype(np.float64)  # [18, 256]
+        q = layer_queries[l].astype(np.float64)  # [17, 256]
         norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)
-        sim = norm @ norm.T  # [18, 18]
+        sim = norm @ norm.T  # [17, 17]
         im = ax.imshow(sim, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
         ax.set_title(f"Query similarity (layer {l})", fontsize=10)
-        ax.set_xticks(range(0, 18, 3))
-        ax.set_xticklabels([_JOINT_NAMES[j] for j in range(0, 18, 3)],
+        tick_indices = range(0, NUM_H36M_KEYPOINTS, 3)
+        ax.set_xticks(tick_indices)
+        ax.set_xticklabels([_JOINT_NAMES[j] for j in tick_indices],
                            rotation=45, fontsize=7)
-        ax.set_yticks(range(0, 18, 3))
-        ax.set_yticklabels([_JOINT_NAMES[j] for j in range(0, 18, 3)], fontsize=7)
+        ax.set_yticks(tick_indices)
+        ax.set_yticklabels([_JOINT_NAMES[j] for j in tick_indices], fontsize=7)
         _add_colorbar(im, ax, label="cosine similarity")
 
     # last column of row 2: hide
@@ -645,14 +641,14 @@ def _fig6_global_correlation(
             feats = ctx.get_tensor("axial_encoder")
             if feats is not None:
                 all_features.append(feats.cpu().numpy())  # [B, 256, 29, 16]
-            all_keypoints.append(target.cpu().numpy())  # [B, 18, 2]
+            all_keypoints.append(target.cpu().numpy())  # [B, 17, 2]
 
     if not all_features:
         print("    [WARN] No encoder features collected for fig6")
         return
 
     features = np.concatenate(all_features, axis=0)  # [N, 256, 29, 16]
-    keypoints = np.concatenate(all_keypoints, axis=0)  # [N, 18, 2]
+    keypoints = np.concatenate(all_keypoints, axis=0)  # [N, 17, 2]
 
     # mean pool over 256 channels → [N, 29, 16]
     feat_pooled = features.mean(axis=1)
@@ -664,10 +660,10 @@ def _fig6_global_correlation(
     group_ranges = [
         ("head",   slice(0, 6)),
         ("upper",  slice(6, 12)),
-        ("lower",  slice(12, 18)),
+        ("lower",  slice(11, NUM_H36M_KEYPOINTS)),
     ]
 
-    for j in range(18):
+    for j in range(NUM_H36M_KEYPOINTS):
         ax = axes[j]
         corr_x = np.zeros((29, 16))
         corr_y = np.zeros((29, 16))

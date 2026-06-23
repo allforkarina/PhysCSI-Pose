@@ -5,14 +5,13 @@ Input GT files are located in a flat directory with naming pattern:
     E{env}_S{subject}_A{action}.npy
 
 Each file contains all frames for a single (environment, subject, action) triple:
-    shape: (N_frames, 17, 3) float32  ← COCO17 keypoints with (x, y, confidence)
+    shape: (N_frames, 17, 3) float32  ← Human3.6M-17 keypoints with (x, y, z/confidence)
 
 This script:
     1. Reads every E{env}_S{subject}_A{action}.npy
     2. Extracts (x, y) plane from (17, 3) → (17, 2)
-    3. Converts COCO17 → OpenPose18 keypoints
-    4. Normalizes coordinates to [pose_min, pose_max] range
-    5. Concatenates all frames into a single (N, 18, 2) array
+    3. Preserves the Human3.6M-17 joint order and raw xy coordinate space
+    4. Concatenates all frames into a single (N, 17, 2) array
     6. Writes ground_truth.npy, meta.npz, and stats.json
 
 Output is drop-in compatible with MemmapDataset.
@@ -34,38 +33,6 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from data.heatmap_gt import coco17_to_openpose18, valid_point
-
-POSE_MIN_DEFAULT = -0.8
-POSE_MAX_DEFAULT = 0.8
-IMG_W = 1920.0
-IMG_H = 1080.0
-
-
-def safe_div(a: float, b: float, eps: float = 1e-6) -> float:
-    return a / (b + eps)
-
-
-def normalize_kpts_to_pose_range(
-    kpts: np.ndarray,
-    pose_min: float = POSE_MIN_DEFAULT,
-    pose_max: float = POSE_MAX_DEFAULT,
-) -> np.ndarray:
-    kpts = np.asarray(kpts, dtype=np.float32).copy()
-    non_zero = kpts[kpts != 0]
-    abs_max = float(np.abs(non_zero).max()) if len(non_zero) > 0 else 0.0
-    if abs_max > 10.0:
-        kpts[..., 0] /= IMG_W
-        kpts[..., 1] /= IMG_H
-        span = pose_max - pose_min
-        kpts = kpts * span + pose_min
-    invalid = ~np.isfinite(kpts).all(axis=-1) | np.all(np.isclose(kpts, 0.0), axis=-1)
-    kpts[invalid] = 0.0
-    kpts = np.clip(kpts, pose_min, pose_max)
-    return kpts.astype(np.float32)
-
-
 FILE_PATTERN = re.compile(r"^E(\d+)_S(\d+)_A(\d+)\.npy$")
 
 
@@ -77,35 +44,35 @@ def parse_gt_filename(filename: str) -> tuple[str, str, str] | None:
     return f"E{int(env_num):02d}", f"S{int(subj_num):02d}", f"A{int(act_num):02d}"
 
 
-def process_gt_file(filepath: Path, pose_min: float, pose_max: float) -> dict | None:
+def extract_h36m17_xy(data: np.ndarray, *, source: str) -> np.ndarray:
+    data = np.asarray(data, dtype=np.float32)
+    if data.ndim != 3 or data.shape[1] != 17 or data.shape[2] not in (2, 3):
+        raise ValueError(f"{source} must have shape [frames,17,2] or [frames,17,3], got {data.shape}")
+    xy = data[:, :, :2]
+    if not np.isfinite(xy).all():
+        raise ValueError(f"{source} contains non-finite GT coordinates")
+    return np.ascontiguousarray(xy, dtype=np.float32)
+
+
+def process_gt_file(filepath: Path) -> dict | None:
     filename = filepath.name
     parsed = parse_gt_filename(filename)
     if parsed is None:
         return None
     environment, subject, action = parsed
 
-    data = np.load(str(filepath))
-    if data.ndim != 3 or data.shape[1:] != (17, 3):
-        print(f"  WARNING: {filename} unexpected shape {data.shape}, skipping")
+    try:
+        keypoints = extract_h36m17_xy(np.load(str(filepath)), source=filename)
+    except ValueError as exc:
+        print(f"  WARNING: {exc}, skipping")
         return None
 
-    coco17_xy = data[:, :, :2].astype(np.float32)
-
-    n_frames = coco17_xy.shape[0]
-    kpts18 = np.zeros((n_frames, 18, 2), dtype=np.float32)
-    for i in range(n_frames):
-        kpts18[i] = normalize_kpts_to_pose_range(
-            coco17_to_openpose18(coco17_xy[i]),
-            pose_min,
-            pose_max,
-        )
-
     return {
-        "kpts18": kpts18,
+        "keypoints": keypoints,
         "environment": environment,
         "sample": subject,
         "action": action,
-        "frame_idx": np.arange(1, n_frames + 1, dtype=np.int64),
+        "frame_idx": np.arange(1, keypoints.shape[0] + 1, dtype=np.int64),
     }
 
 
@@ -121,8 +88,6 @@ def main():
         default="/data/WiFiPose/dataset/mmfi_pose_v3",
         help="Output directory for ground_truth.npy and meta.npz",
     )
-    parser.add_argument("--pose-min", type=float, default=POSE_MIN_DEFAULT)
-    parser.add_argument("--pose-max", type=float, default=POSE_MAX_DEFAULT)
     args = parser.parse_args()
 
     src_dir = Path(args.src)
@@ -144,7 +109,7 @@ def main():
 
     print(f"Found {len(gt_files)} GT files in {src_dir}")
 
-    all_kpts18: list[np.ndarray] = []
+    all_keypoints: list[np.ndarray] = []
     all_envs: list[str] = []
     all_subjects: list[str] = []
     all_actions: list[str] = []
@@ -154,13 +119,13 @@ def main():
 
     t0 = time.time()
     for i, fp in enumerate(gt_files):
-        result = process_gt_file(fp, args.pose_min, args.pose_max)
+        result = process_gt_file(fp)
         if result is None:
             skipped += 1
             continue
 
-        n = result["kpts18"].shape[0]
-        all_kpts18.append(result["kpts18"])
+        n = result["keypoints"].shape[0]
+        all_keypoints.append(result["keypoints"])
         all_envs.extend([result["environment"]] * n)
         all_subjects.extend([result["sample"]] * n)
         all_actions.extend([result["action"]] * n)
@@ -171,12 +136,12 @@ def main():
             elapsed = time.time() - t0
             print(f"  [{i + 1}/{len(gt_files)}] {fp.name} ({n} frames) — {elapsed:.1f}s elapsed")
 
-    if not all_kpts18:
+    if not all_keypoints:
         print("ERROR: No GT files processed successfully")
         sys.exit(1)
 
-    print(f"\nConcatenating {total_frames} frames from {len(all_kpts18)} files ({len(gt_files) - len(all_kpts18)} skipped)...")
-    ground_truth = np.concatenate(all_kpts18, axis=0).astype(np.float32)
+    print(f"\nConcatenating {total_frames} frames from {len(all_keypoints)} files ({len(gt_files) - len(all_keypoints)} skipped)...")
+    ground_truth = np.concatenate(all_keypoints, axis=0).astype(np.float32)
     envs_arr = np.array(all_envs)
     subjects_arr = np.array(all_subjects)
     actions_arr = np.array(all_actions)
@@ -200,9 +165,10 @@ def main():
 
     stats = {
         "total_frames": int(total_frames),
-        "total_files": len(all_kpts18),
-        "pose_min": args.pose_min,
-        "pose_max": args.pose_max,
+        "total_files": len(all_keypoints),
+        "gt_coordinate_space": "human36m_raw_xy",
+        "gt_normalization": "none",
+        "gt_shape": [17, 2],
         "source": str(src_dir.resolve()),
     }
     with open(dst_dir / "gt_stats.json", "w") as f:

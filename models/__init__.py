@@ -1,4 +1,11 @@
-from .skeleton import NUM_OPENPOSE_KEYPOINTS, OPENPOSE_BONE_EDGES, build_normalized_adjacency
+from .skeleton import (
+    H36M17_BONE_EDGES,
+    H36M17_JOINT_NAMES,
+    NUM_H36M_KEYPOINTS,
+    NUM_POSE_KEYPOINTS,
+    POSE_BONE_EDGES,
+    build_normalized_adjacency,
+)
 from .wiflow_axial_encoder import AXIAL_ENCODER_MODES, WiFlowAxialEncoder
 from .wiflow_hierarchical_joint_decoder import WiFlowHierarchicalJointDecoder
 from .wiflow_joint_decoder import WiFlowJointDecoder
@@ -13,7 +20,10 @@ __all__ = [
     "DECODER_TYPES",
     "WiFlowJointDecoder",
     "WiFlowHierarchicalJointDecoder",
-    "OPENPOSE_BONE_EDGES",
-    "NUM_OPENPOSE_KEYPOINTS",
+    "H36M17_BONE_EDGES",
+    "H36M17_JOINT_NAMES",
+    "NUM_H36M_KEYPOINTS",
+    "NUM_POSE_KEYPOINTS",
+    "POSE_BONE_EDGES",
     "build_normalized_adjacency",
 ]

@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Subset
 
 from data.memmap_dataset import MemmapDataset
 from dataloader import create_memmap_data_loader, memmap_collate_fn
-from models import WiFlowModel
+from models import H36M17_JOINT_NAMES, WiFlowModel
 from train import (
     compute_metrics,
     compute_torso_scale,
@@ -24,30 +24,10 @@ from train import (
     select_device,
 )
 
-OPENPOSE18_JOINT_NAMES: tuple[str, ...] = (
-    "nose",
-    "neck",
-    "right_shoulder",
-    "right_elbow",
-    "right_wrist",
-    "left_shoulder",
-    "left_elbow",
-    "left_wrist",
-    "right_hip",
-    "right_knee",
-    "right_ankle",
-    "left_hip",
-    "left_knee",
-    "left_ankle",
-    "right_eye",
-    "left_eye",
-    "right_ear",
-    "left_ear",
-)
-DISTAL_LIMB_JOINTS = {4, 7, 10, 13}
-MID_LIMB_JOINTS = {3, 6, 9, 12}
-TORSO_ANCHOR_JOINTS = {1, 2, 5, 8, 11}
-HEAD_JOINTS = {0, 14, 15, 16, 17}
+DISTAL_LIMB_JOINTS = {3, 6, 13, 16}
+MID_LIMB_JOINTS = {2, 5, 12, 15}
+TORSO_ANCHOR_JOINTS = {0, 1, 4, 7, 8, 9, 11, 14}
+HEAD_JOINTS = {10}
 
 
 def _joint_group(joint_index: int) -> str:
@@ -99,7 +79,7 @@ def load_checkpoint_model(
 
 
 def _joint_errors(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Per-joint Euclidean distance, shape [B, 18]."""
+    """Per-joint Euclidean distance, shape [B, 17]."""
     return torch.linalg.vector_norm(prediction - target, dim=-1)
 
 
@@ -109,7 +89,7 @@ def _joint_pck(
     threshold: float = 0.2,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Per-joint PCK boolean mask, shape [B, 18].
+    """Per-joint PCK boolean mask, shape [B, 17].
 
     Uses torso diagonal (right shoulder – left hip) as the normalisation
     reference, consistent with the training metric.
@@ -262,19 +242,19 @@ def _compute_diagnostics(
 
     Parameters
     ----------
-    all_predictions : list of ndarray, each [B, 18, 2]
-    all_targets : list of ndarray, each [B, 18, 2]
+    all_predictions : list of ndarray, each [B, 17, 2]
+    all_targets : list of ndarray, each [B, 17, 2]
 
     Returns
     -------
     dict with ``overall`` averaged metrics and ``joint_rows`` list of dicts.
     """
-    preds = np.concatenate(list(all_predictions), axis=0)  # [N, 18, 2]
-    targets = np.concatenate(list(all_targets), axis=0)    # [N, 18, 2]
+    preds = np.concatenate(list(all_predictions), axis=0)  # [N, 17, 2]
+    targets = np.concatenate(list(all_targets), axis=0)    # [N, 17, 2]
 
     # per-joint variance over sample axis, averaged over x/y
-    pred_var = preds.var(axis=0).mean(axis=1)   # [18]
-    gt_var = targets.var(axis=0).mean(axis=1)    # [18]
+    pred_var = preds.var(axis=0).mean(axis=1)   # [17]
+    gt_var = targets.var(axis=0).mean(axis=1)    # [17]
     var_ratio = np.divide(
         pred_var,
         gt_var,
@@ -291,14 +271,14 @@ def _compute_diagnostics(
     )
 
     # L2 distance between per-joint means
-    pred_mean = preds.mean(axis=0)   # [18, 2]
-    gt_mean = targets.mean(axis=0)   # [18, 2]
-    mean_pose_dist = np.linalg.norm(pred_mean - gt_mean, axis=1)  # [18]
+    pred_mean = preds.mean(axis=0)   # [17, 2]
+    gt_mean = targets.mean(axis=0)   # [17, 2]
+    mean_pose_dist = np.linalg.norm(pred_mean - gt_mean, axis=1)  # [17]
 
     joint_rows = [
         {
             "joint_index": j,
-            "joint_name": OPENPOSE18_JOINT_NAMES[j],
+            "joint_name": H36M17_JOINT_NAMES[j],
             "joint_group": _joint_group(j),
             "pred_std": float(pred_std[j]),
             "gt_std": float(gt_std[j]),
@@ -308,7 +288,7 @@ def _compute_diagnostics(
             "var_ratio": float(var_ratio[j]),
             "mean_pose_dist": float(mean_pose_dist[j]),
         }
-        for j in range(18)
+        for j in range(preds.shape[1])
     ]
 
     overall = {

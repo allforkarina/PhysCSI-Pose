@@ -12,7 +12,7 @@ DECODER_TYPES = ("joint", "hierarchical")
 
 
 class WiFlowModel(nn.Module):
-    """End-to-end WiFlow model that maps CSI features to OpenPose18 coordinates."""
+    """End-to-end WiFlow model that maps CSI features to Human3.6M-17 coordinates."""
 
     def __init__(
         self,

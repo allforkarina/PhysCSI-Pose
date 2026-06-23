@@ -30,5 +30,5 @@ def test_forward_decodes_encoded_features() -> None:
         prediction = model(x)
         decoded = model.decode_features(model.encode_features(x))
 
-    assert prediction.shape == (2, 18, 2)
+    assert prediction.shape == (2, 17, 2)
     assert torch.allclose(prediction, decoded)

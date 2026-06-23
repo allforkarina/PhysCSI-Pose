@@ -16,16 +16,16 @@ from torch.optim.lr_scheduler import LRScheduler, OneCycleLR
 from torch.utils.data import DataLoader, Subset
 
 from dataloader import create_few_shot_data_loader, create_memmap_data_loader, create_memmap_data_loaders
-from models import AXIAL_ENCODER_MODES, DECODER_TYPES, OPENPOSE_BONE_EDGES, WiFlowModel
+from models import AXIAL_ENCODER_MODES, DECODER_TYPES, H36M17_BONE_EDGES, WiFlowModel
 
 
 PCK_THRESHOLDS: tuple[float, ...] = (0.1, 0.2, 0.3, 0.4, 0.5)
 ALIGN_LOSSES: tuple[str, ...] = ("none", "coral")
 ALIGN_LAYERS: tuple[str, ...] = ("axial",)
 JOINT_LOSS_PRESETS: tuple[str, ...] = ("uniform", "lower_limb")
-LOWER_LIMB_JOINTS: tuple[int, ...] = (8, 9, 10, 11, 12, 13)
-RIGHT_SHOULDER_INDEX = 2
-LEFT_HIP_INDEX = 11
+LOWER_LIMB_JOINTS: tuple[int, ...] = (1, 2, 3, 4, 5, 6)
+RIGHT_SHOULDER_INDEX = 14
+LEFT_HIP_INDEX = 4
 TRAINABLE_GROUPS: tuple[str, ...] = (
     "encoder",
     "decoder",
@@ -96,7 +96,7 @@ def prepare_model_input(
 def bone_length_loss(
     prediction: torch.Tensor,
     target: torch.Tensor,
-    edges: tuple[tuple[int, int], ...] = OPENPOSE_BONE_EDGES,
+    edges: tuple[tuple[int, int], ...] = H36M17_BONE_EDGES,
 ) -> torch.Tensor:
     edge_index = torch.as_tensor(edges, dtype=torch.long, device=prediction.device)
     pred_lengths = torch.linalg.vector_norm(
@@ -1032,7 +1032,7 @@ def parse_args() -> argparse.Namespace:
         choices=JOINT_LOSS_PRESETS,
         help=(
             "Coordinate loss weighting preset. Use lower_limb to upweight "
-            "OpenPose18 hip/knee/ankle joints for cross-domain lower-limb ablations."
+            "Human3.6M-17 hip/knee/ankle joints for cross-domain lower-limb ablations."
         ),
     )
     parser.add_argument(

@@ -34,4 +34,8 @@ Ground-truth filename example:
 
 ## Ground-Truth Skeleton
 
-The project GT is confirmed to use the Human3.6M human skeleton joint order.
+The project GT is confirmed to use the standard Human3.6M-17 human skeleton joint order. The labels are already ordered as Human3.6M and must not be converted to OpenPose.
+
+Training targets use only raw `xy` coordinates from the GT arrays, with shape `[N, 17, 2]`. The data build step should preserve the original coordinate range and should not apply image-size normalization or clip labels into `[-0.8, 0.8]`.
+
+The memmap CSI tensor is built from raw `CSIamp` shaped `[3, 114, 10]`, Fourier-resampled on the time axis to 64 packets, saved as `[N, 64, 3, 114]`, and loaded by the dataloader as model input `[B, 3, 114, 64]`.

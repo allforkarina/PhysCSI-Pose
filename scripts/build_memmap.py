@@ -1,5 +1,5 @@
 """
-Build memory-mapped .npy files from MM-Fi dataset for fast training I/O.
+Build memory-mapped .npy files from WiFiPose CSI and Human3.6M-17 GT files.
 
 Pre-computes 3 normalization variants and stores each as a single .npy file.
 Training loader uses np.load(path, mmap_mode='r') for zero-copy OS-cached access.
@@ -7,14 +7,14 @@ Training loader uses np.load(path, mmap_mode='r') for zero-copy OS-cached access
 Input:
     /data/WiFiPose/dataset/dataset/{ACTION}/{SUBJECT}/
         wifi-csi/frame*.mat   ← CSIamp (3, 114, 10) float64
-        rgb/frame*.npy        ← COCO17 keypoints (17, 2) float32
+        rgb/frame*.npy        ← optional Human3.6M-17 xy keypoints (17, 2) float32
 
 Output:
     /data/WiFiPose/dataset/mmfi_pose_v3/
         csi_gminmax.npy  ← global_minmax normalized (N, 64, 3, 114) float32
         csi_gzscore.npy  ← global_zscore normalized (N, 64, 3, 114) float32
         csi_zscore.npy   ← per-sample zscore normalized (N, 64, 3, 114) float32
-        ground_truth.npy ← OpenPose18, pose_range (N, 18, 2) float32
+        ground_truth.npy ← Human3.6M-17 raw xy coordinates (N, 17, 2) float32
         meta.npz         ← environment, sample, action, frame_idx
         stats.json       ← normalization statistics
 
@@ -45,27 +45,6 @@ TIME_PACKETS = 64
 RX_ANTENNAS = 3
 SUBCARRIERS = 114
 
-COCO17_TO_OPENPOSE18 = {
-    0: 0,
-    2: 6,
-    3: 8,
-    4: 10,
-    5: 5,
-    6: 7,
-    7: 9,
-    8: 12,
-    9: 14,
-    10: 16,
-    11: 11,
-    12: 13,
-    13: 15,
-    14: 2,
-    15: 1,
-    16: 4,
-    17: 3,
-}
-
-
 def derive_env(subject: str) -> str:
     num = int(subject.lstrip("S"))
     return f"env{(num - 1) // 10 + 1}"
@@ -86,48 +65,19 @@ def preprocess_csi_one_frame(csi_amp: np.ndarray) -> np.ndarray:
     return np.transpose(csi_amp, (2, 0, 1)).astype(np.float32, copy=False)
 
 
-def _valid_point(point: np.ndarray) -> bool:
-    point = np.asarray(point)
-    return bool(np.isfinite(point).all() and not np.allclose(point, 0.0))
-
-
-def coco17_to_openpose18(kpts17: np.ndarray) -> np.ndarray:
-    kpts17 = np.asarray(kpts17, dtype=np.float32)
-    kpts18 = np.zeros((18, 2), dtype=np.float32)
-    valid = np.zeros(18, dtype=bool)
-    for op_idx, coco_idx in COCO17_TO_OPENPOSE18.items():
-        p = kpts17[coco_idx]
-        if _valid_point(p):
-            kpts18[op_idx] = p
-            valid[op_idx] = True
-    l_sh, r_sh = kpts17[5], kpts17[6]
-    if _valid_point(l_sh) and _valid_point(r_sh):
-        kpts18[1] = (l_sh + r_sh) * 0.5
-        valid[1] = True
-    elif _valid_point(l_sh):
-        kpts18[1] = l_sh; valid[1] = True
-    elif _valid_point(r_sh):
-        kpts18[1] = r_sh; valid[1] = True
-    kpts18[~valid] = 0.0
-    return kpts18
-
-
-def normalize_kpts_to_pose_range(
-    kpts: np.ndarray, pose_min: float = -0.8, pose_max: float = 0.8,
-) -> np.ndarray:
-    kpts = np.asarray(kpts, dtype=np.float32).copy()
-    non_zero = kpts[kpts != 0]
-    abs_max = float(np.abs(non_zero).max()) if len(non_zero) > 0 else 0.0
-    if abs_max > 10.0:
-        IMG_W, IMG_H = 1920.0, 1080.0
-        kpts[..., 0] /= IMG_W
-        kpts[..., 1] /= IMG_H
-        span = pose_max - pose_min
-        kpts = kpts * span + pose_min
-    invalid = ~np.isfinite(kpts).all(axis=-1) | np.all(np.isclose(kpts, 0.0), axis=-1)
-    kpts[invalid] = 0.0
-    kpts = np.clip(kpts, pose_min, pose_max)
-    return kpts.astype(np.float32)
+def extract_h36m17_xy(gt_data: np.ndarray, *, source: str) -> np.ndarray:
+    gt_data = np.asarray(gt_data, dtype=np.float32)
+    if gt_data.ndim == 3 and gt_data.shape[1] == 17 and gt_data.shape[2] in (2, 3):
+        xy = gt_data[:, :, :2]
+    elif gt_data.ndim == 2 and gt_data.shape == (17, 2):
+        xy = gt_data[None, :, :]
+    else:
+        raise ValueError(
+            f"{source} must have shape [frames,17,2], [frames,17,3], or [17,2], got {gt_data.shape}"
+        )
+    if not np.isfinite(xy).all():
+        raise ValueError(f"{source} contains non-finite GT coordinates")
+    return np.ascontiguousarray(xy, dtype=np.float32)
 
 
 def iter_trials(src_root: Path, require_rgb: bool = True) -> list[Path]:
@@ -173,23 +123,13 @@ def process_trial(
         gt_path = gt_dir / gt_filename
         if not gt_path.exists():
             print(f"  WARNING: GT file {gt_filename} not found, zero-filling keypoints")
-            kpts18 = np.zeros((n_frames, 18, 2), dtype=np.float32)
+            keypoints = np.zeros((n_frames, 17, 2), dtype=np.float32)
         else:
-            gt_data = np.load(str(gt_path))
-            if gt_data.ndim != 3 or gt_data.shape[1:] != (17, 3):
-                print(f"  WARNING: {gt_filename} unexpected shape {gt_data.shape}, zero-filling")
-                kpts18 = np.zeros((n_frames, 18, 2), dtype=np.float32)
-            else:
-                gt_coco17 = gt_data[:, :, :2].astype(np.float32)
-                gt_n = gt_coco17.shape[0]
-                kpts18 = np.zeros((n_frames, 18, 2), dtype=np.float32)
-                common_n = min(n_frames, gt_n)
-                for j in range(common_n):
-                    kpts18[j] = normalize_kpts_to_pose_range(
-                        coco17_to_openpose18(gt_coco17[j]),
-                        pose_min,
-                        pose_max,
-                    )
+            gt_xy = extract_h36m17_xy(np.load(str(gt_path)), source=gt_filename)
+            gt_n = gt_xy.shape[0]
+            keypoints = np.zeros((n_frames, 17, 2), dtype=np.float32)
+            common_n = min(n_frames, gt_n)
+            keypoints[:common_n] = gt_xy[:common_n]
     else:
         rgb_dir = trial_dir / "rgb"
         npy_paths = sorted(rgb_dir.glob("frame*.npy"))
@@ -200,20 +140,17 @@ def process_trial(
             return None
         n_frames = len(common)
         csi_frames = np.empty((n_frames, TIME_PACKETS, RX_ANTENNAS, SUBCARRIERS), dtype=np.float32)
-        kpts18 = np.zeros((n_frames, 18, 2), dtype=np.float32)
+        keypoints = np.zeros((n_frames, 17, 2), dtype=np.float32)
         frame_idx = np.zeros(n_frames, dtype=np.int64)
         for i, stem in enumerate(common):
             mat = sio.loadmat(str(mat_stems[stem]))
             csi_frames[i] = preprocess_csi_one_frame(np.asarray(mat["CSIamp"], dtype=np.float32))
-            kpts_coco17 = np.load(str(npy_stems[stem]))
-            kpts18[i] = normalize_kpts_to_pose_range(
-                coco17_to_openpose18(kpts_coco17), pose_min, pose_max
-            )
+            keypoints[i] = extract_h36m17_xy(np.load(str(npy_stems[stem])), source=npy_stems[stem].name)[0]
             frame_idx[i] = int(stem.replace("frame", ""))
 
     return {
         "csi": csi_frames,
-        "kpts18": kpts18,
+        "keypoints": keypoints,
         "environment": environment,
         "sample": subject,
         "action": action,
@@ -299,7 +236,7 @@ def main():
 
     print("Concatenating...")
     all_csi_raw  = np.concatenate([d["csi"] for d in all_data], axis=0).astype(np.float32)
-    all_kpts18   = np.concatenate([d["kpts18"] for d in all_data], axis=0).astype(np.float32)
+    all_keypoints = np.concatenate([d["keypoints"] for d in all_data], axis=0).astype(np.float32)
     all_envs     = np.array([e for d in all_data for e in [d["environment"]] * d["csi"].shape[0]])
     all_subjects = np.array([s for d in all_data for s in [d["sample"]]      * d["csi"].shape[0]])
     all_actions  = np.array([a for d in all_data for a in [d["action"]]      * d["csi"].shape[0]])
@@ -339,7 +276,7 @@ def main():
     np.save(str(dst_root / "csi_gminmax.npy"), csi_gminmax)
     np.save(str(dst_root / "csi_gzscore.npy"), csi_gzscore)
     np.save(str(dst_root / "csi_zscore.npy"),  csi_zscore)
-    np.save(str(dst_root / "ground_truth.npy"), all_kpts18)
+    np.save(str(dst_root / "ground_truth.npy"), all_keypoints)
     np.savez(str(dst_root / "meta.npz"),
              environment=all_envs, sample=all_subjects,
              action=all_actions, frame_idx=all_fidx)
@@ -349,8 +286,9 @@ def main():
         "amplitude_train_max":  amp_max,
         "amplitude_train_mean": amp_mean,
         "amplitude_train_std":  amp_std,
-        "pose_min": args.pose_min,
-        "pose_max": args.pose_max,
+        "gt_coordinate_space": "human36m_raw_xy",
+        "gt_normalization": "none",
+        "gt_shape": [17, 2],
         "time_packets": TIME_PACKETS,
         "rx_antennas": RX_ANTENNAS,
         "subcarriers": SUBCARRIERS,

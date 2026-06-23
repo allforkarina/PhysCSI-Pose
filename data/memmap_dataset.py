@@ -49,7 +49,7 @@ class MemmapDataset(Dataset):
 
         self._csi = np.load(str(data_dir / CSI_FILES[normalize]), mmap_mode="r")
 
-        self._kpts18 = np.load(str(data_dir / "ground_truth.npy"))
+        self._keypoints = np.load(str(data_dir / "ground_truth.npy"))
 
         meta = np.load(str(data_dir / "meta.npz"), allow_pickle=True)
         self._envs = meta["environment"]
@@ -142,11 +142,11 @@ class MemmapDataset(Dataset):
         frame_idx = int(self.indices[index])
 
         csi = np.array(self._csi[frame_idx])
-        kpts18 = self._kpts18[frame_idx].copy()
+        keypoints = self._keypoints[frame_idx].copy()
 
         item: dict = {
             "csi": torch.from_numpy(csi),
-            "kpts18": torch.from_numpy(np.ascontiguousarray(kpts18)),
+            "keypoints": torch.from_numpy(np.ascontiguousarray(keypoints)),
             "meta": {
                 "env": str(self._envs[frame_idx]),
                 "subject": str(self._samples[frame_idx]),

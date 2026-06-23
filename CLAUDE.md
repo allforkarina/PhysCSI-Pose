@@ -2,10 +2,10 @@
 
 ## Project Structure & Module Organization
 - `dataloader.py`: Core module for loading NPY memmap datasets, creating PyTorch `DataLoader` instances with `memmap_collate_fn`, and providing `create_memmap_data_loader` / `create_memmap_data_loaders` / `create_few_shot_data_loader` factory functions.
-- `data/memmap_dataset.py`: NPY memmap dataset reader that loads CSI amplitude, OpenPose18 keypoints, and metadata from `.npy`/`.npz` files with zero-copy OS-cached I/O.
-- `data/heatmap_gt.py`: OpenPose18 coordinate conversion utilities (coco17_to_openpose18, valid_point).
+- `data/memmap_dataset.py`: NPY memmap dataset reader that loads CSI amplitude, Human3.6M-17 keypoints, and metadata from `.npy`/`.npz` files with zero-copy OS-cached I/O.
+- `data/heatmap_gt.py`: Human3.6M-17 coordinate validation/extraction utilities (`extract_h36m17_xy`, `valid_point`).
 - `pose_targets.py`: Reserved for future pose target utilities.
-- `models/`: PyTorch model code, including the full WiFlow model, CSI spatial encoder with symmetric spatio-temporal downsampling, axial attention encoder, multi-layer joint cross-attention decoder, hierarchical joint decoder ablation, and shared OpenPose18 skeleton topology. The active single-frame model path is CSI amplitude input -> spatial encoder with antenna mixing, feature stem, and symmetric time-frequency residual blocks -> axial encoder -> the configured decoder.
+- `models/`: PyTorch model code, including the full WiFlow model, CSI spatial encoder with symmetric spatio-temporal downsampling, axial attention encoder, multi-layer joint cross-attention decoder, hierarchical joint decoder ablation, and shared Human3.6M-17 skeleton topology. The active single-frame model path is CSI amplitude input -> spatial encoder with antenna mixing, feature stem, and symmetric time-frequency residual blocks -> axial encoder -> the configured decoder.
 - `train.py`: Root-level training entrypoint for WiFlow pose regression, including losses, metrics, optimizer, scheduler, checkpointing, and CSV logging. Supports `--mode source_only` (single-domain training) and `--mode finetune` (cross-domain few-shot finetuning with Tier 1/2 freeze).
 - `eval.py`: Root-level evaluation entrypoint for loading checkpoints, computing test metrics, and optionally generating research-grade feature visualizations via `--feature-viz`. Supports `--eval-envs` (environment filtering) and `--exclude-indices` (exclude few-shot training frames).
 - `evaluation/`: Evaluation pipeline package.
@@ -24,7 +24,7 @@ Generated datasets can be large and should not be committed. Keep raw dataset ro
 ## Project Domain Knowledge
 - One CSI sample is a physical signal tensor shaped `64 time steps x 3 antennas x 114 subcarriers` in the NPY memmap dataset. The model input is `[B, 3, 114, 64]` (channels-first). The subcarrier axis carries spatial-frequency response, the antenna axis carries spatial phase-difference and direction information, and the temporal axis (64 steps, upsampled from 10 original time shots) carries motion cues such as Doppler effects.
 - Only CSI amplitude is used as input (3 channels, one per antenna). Phase information is not used.
-- The target pose is the structured OpenPose18 keypoint set (18 joints including neck). The 18 joints are not independent coordinates; they are constrained by the human skeleton topology (19 bone edges).
+- The target pose is the structured Human3.6M-17 keypoint set. GT is already in standard Human3.6M order and must not be converted to OpenPose. The 17 joints are constrained by the Human3.6M skeleton topology.
 - The central modeling gap is that CSI is a low-resolution, high-noise, implicit sensing signal, while pose regression needs precise coordinates. Strong skeleton priors are important for bridging that gap.
 - Preserve CSI physical dimension semantics where practical. Avoid arbitrary flattening or pooling that mixes antenna, subcarrier, and temporal meanings before the model has selected useful information.
 - Prefer attention-based information selection over destructive pooling for low-SNR CSI features, and use structured supervision such as bone or topology-aware losses in addition to coordinate losses.
@@ -100,7 +100,7 @@ python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\finetune\best_
 ```
 
 ## Coding Style & Naming Conventions
-Use Python 3.10+ syntax, type hints, and `pathlib.Path` for paths. Group imports as standard library, third-party, then local. Follow existing naming: `snake_case` functions/variables, `PascalCase` classes, and uppercase constants such as `NUM_OPENPOSE_KEYPOINTS`. Use 4-space indentation. Keep comments focused on dataset assumptions, shapes, and normalization.
+Use Python 3.10+ syntax, type hints, and `pathlib.Path` for paths. Group imports as standard library, third-party, then local. Follow existing naming: `snake_case` functions/variables, `PascalCase` classes, and uppercase constants such as `NUM_H36M_KEYPOINTS`. Use 4-space indentation. Keep comments focused on dataset assumptions, shapes, and normalization.
 
 ## Testing Guidelines
 Automated tests use `pytest`. Add tests for split generation, path validation, shape validation, normalization edge cases, model shape contracts, and memmap dataset loading. Name files `test_*.py` and tests `test_<behavior>()`. Use temporary directories and tiny synthetic fixtures.

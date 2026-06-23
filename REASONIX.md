@@ -3,7 +3,7 @@
 ## Stack
 - Python 3.10+, PyTorch (torch, torch.nn, torch.optim)
 - NumPy for array ops, NPY memmap dataset I/O
-- OpenPose18 skeleton: 18 keypoints, 19 bone edges
+- Human3.6M-17 skeleton: 17 keypoints, raw xy GT coordinates
 - Conda env `WiFiPose` (torch, numpy, scipy, h5py, tqdm, pytest)
 - No package manifest — scripts run directly from repo root
 
@@ -22,7 +22,7 @@
 ## Commands
 ```powershell
 # Build memmap dataset
-python scripts\build_memmap.py --dataset-root D:\path\to\raw\dataset --output-dir data\mmfi_pose --seed 42
+python scripts\build_memmap.py --src D:\path\to\raw\dataset --dst data\mmfi_pose --gt-dir D:\path\to\ground_truth_npy --workers 4
 
 # Train
 python train.py --mode source_only --dataset-root data\mmfi_pose --epochs 50 --batch-size 64 --output-dir outputs\train
