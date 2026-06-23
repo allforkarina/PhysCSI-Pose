@@ -52,6 +52,31 @@ def test_compute_normalization_stats_uses_only_training_indices(tmp_path: Path) 
     assert np.allclose(stats.std, 5.0)
 
 
+def test_compute_normalization_stats_reads_training_indices_in_chunks(tmp_path: Path) -> None:
+    from dataset.normalization import compute_normalization_stats
+
+    class CountingArray:
+        def __init__(self, values: np.ndarray) -> None:
+            self.values = values
+            self.shape = values.shape
+            self.ndim = values.ndim
+            self.max_requested = 0
+
+        def __getitem__(self, index: object) -> np.ndarray:
+            if isinstance(index, np.ndarray):
+                self.max_requested = max(self.max_requested, int(index.size))
+            return self.values[index]
+
+    values = np.arange(5 * 3 * 2 * 4, dtype=np.float32).reshape(5, 3, 2, 4)
+    x = CountingArray(values)
+
+    stats = compute_normalization_stats(x, frame_indices=[0, 1, 2, 3, 4], chunk_size=2)
+
+    assert x.max_requested <= 2
+    assert np.allclose(stats.mean, values.mean(axis=(0, 3), keepdims=True))
+    assert np.allclose(stats.std, values.std(axis=(0, 3), keepdims=True))
+
+
 def test_normalization_stats_roundtrip(tmp_path: Path) -> None:
     from dataset.normalization import NormalizationStats, load_normalization_stats, save_normalization_stats
 

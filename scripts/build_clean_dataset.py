@@ -372,13 +372,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repair-time-radius", type=int, default=1)
     parser.add_argument("--target-min", type=float, default=-0.8)
     parser.add_argument("--target-max", type=float, default=0.8)
+    parser.add_argument(
+        "--gt-source-range-policy",
+        choices=("fixed", "estimate-selected"),
+        default="fixed",
+        help="Use fixed source range by default to avoid cross-environment label-stat leakage.",
+    )
     parser.add_argument("--gt-outlier-abs-xy", type=float, default=2.0)
     parser.add_argument("--gt-outlier-bbox-width", type=float, default=2.0)
     parser.add_argument("--gt-outlier-bbox-height", type=float, default=2.5)
-    parser.add_argument("--gt-source-x-min", type=float, default=None)
-    parser.add_argument("--gt-source-x-max", type=float, default=None)
-    parser.add_argument("--gt-source-y-min", type=float, default=None)
-    parser.add_argument("--gt-source-y-max", type=float, default=None)
+    parser.add_argument("--gt-source-x-min", type=float, default=-1.0)
+    parser.add_argument("--gt-source-x-max", type=float, default=1.0)
+    parser.add_argument("--gt-source-y-min", type=float, default=-1.0)
+    parser.add_argument("--gt-source-y-max", type=float, default=1.0)
     parser.add_argument("--max-sequences", type=int, default=None)
     parser.add_argument("--progress-every", type=int, default=10)
     parser.add_argument("--overwrite", action="store_true")
@@ -407,10 +413,7 @@ def main() -> None:
         raise ValueError("no sequences selected")
 
     progress(f"selected sequences={len(sequences)}")
-    range_overrides = [args.gt_source_x_min, args.gt_source_x_max, args.gt_source_y_min, args.gt_source_y_max]
-    if any(value is not None for value in range_overrides):
-        if not all(value is not None for value in range_overrides):
-            raise ValueError("provide all GT source range overrides or none")
+    if args.gt_source_range_policy == "fixed":
         gt_range = {
             "x_min": float(args.gt_source_x_min),
             "x_max": float(args.gt_source_x_max),
@@ -593,6 +596,7 @@ def main() -> None:
         },
         "target_dims": "xy_2d",
         "target_range": [args.target_min, args.target_max],
+        "gt_source_range_policy": args.gt_source_range_policy,
         "gt_source_range": gt_range,
         "repair_filter": {
             "type": "same_antenna_window_mean",

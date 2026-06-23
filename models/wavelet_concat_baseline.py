@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 import torch
 from torch import nn
 
@@ -17,12 +19,13 @@ class WaveletConcatBaseline(nn.Module):
         num_joints: int = 17,
         d_model: int = 256,
         wavelet: str = "db2",
+        wavelet_bands: Sequence[str] | None = None,
         use_graph_refiner: bool = False,
     ) -> None:
         super().__init__()
-        self.feature_bank = TemporalSWTFeatureBank(wavelet=wavelet, levels=3)
+        self.feature_bank = TemporalSWTFeatureBank(wavelet=wavelet, levels=3, bands=wavelet_bands)
         self.stem = nn.Sequential(
-            nn.Conv2d(15, 16, kernel_size=1),
+            nn.Conv2d(3 * len(self.feature_bank.bands), 16, kernel_size=1),
             nn.GELU(),
             nn.Conv2d(16, 32, kernel_size=(5, 3), padding=(2, 1)),
             nn.GroupNorm(8, 32),
@@ -42,15 +45,20 @@ class WaveletConcatBaseline(nn.Module):
             nn.Linear(128, 2),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.ndim != 4 or x.shape[1:] != (3, 114, 64):
-            raise ValueError(f"expected input [batch,3,114,64], got {tuple(x.shape)}")
-        features = self.feature_bank(x)
-        concat = torch.cat(list(features.values()), dim=1)
+    def forward(self, x: torch.Tensor | Mapping[str, torch.Tensor]) -> torch.Tensor:
+        if isinstance(x, Mapping):
+            features = x
+            raw = features["raw"]
+        else:
+            raw = x
+            features = self.feature_bank(x)
+        if raw.ndim != 4 or raw.shape[1:] != (3, 114, 64):
+            raise ValueError(f"expected input [batch,3,114,64], got {tuple(raw.shape)}")
+        concat = torch.cat([features[band] for band in self.feature_bank.bands], dim=1)
         stem_features = self.stem(concat)
         spatial_features = self.spatial_encoder(stem_features)
         encoded_features = self.axial_encoder(spatial_features)
-        tokens = encoded_features.permute(0, 2, 3, 1).reshape(x.shape[0], 29 * 16, -1)
+        tokens = encoded_features.permute(0, 2, 3, 1).reshape(raw.shape[0], 29 * 16, -1)
         joint_features = self.joint_decoder(tokens)
         if self.graph_refiner is not None:
             joint_features = self.graph_refiner(joint_features)

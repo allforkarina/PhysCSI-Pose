@@ -3,9 +3,15 @@ metadata:
   input_layout: antenna,subcarrier,time
 
 data:
+  root: /data/WiFiPose/dataset/clean_dataset
   x_file: X_amp_resampled.npy
   y_file: Y_2d_clean.npy
+  meta_file: meta.npz
+  split_index_file: split_index.npz
+  eval_env: 4
   normalization: train_split_only
+  normalization_chunk_size: 1024
+  precompute_wavelet: false
 
 model:
   type: baseline
@@ -23,6 +29,14 @@ losses:
 
 trainable_groups:
   - all
+
+training:
+  epochs: 80
+  batch_size: 32
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  num_workers: 4
+  checkpoint_dir: outputs/checkpoints/baseline
 
 logging:
   metrics:

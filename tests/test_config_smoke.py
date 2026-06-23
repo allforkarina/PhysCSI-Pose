@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from torch import nn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -79,3 +80,79 @@ def test_graph_refinement_flag_is_trainable_for_baseline() -> None:
         pose = extract_pose(model(torch.randn(1, 3, 114, 64)))
 
     assert pose.shape == (1, 17, 2)
+
+
+def test_wavelet_band_config_changes_concat_model_channels() -> None:
+    from train import build_model, load_config
+
+    config = load_config(REPO_ROOT / "configs" / "wavelet_concat.yaml")
+    config["model"]["wavelet_bands"] = ["raw", "D2", "D1"]
+    model = build_model(config)
+
+    assert tuple(model.feature_bank.bands) == ("raw", "D2", "D1")
+    assert model.stem[0].in_channels == 9
+
+
+def test_gate_config_can_disable_learned_joint_gate() -> None:
+    from train import build_model, load_config
+
+    config = load_config(REPO_ROOT / "configs" / "wm_wiflow.yaml")
+    config["model"]["gate"] = False
+    config["model"]["graph_refinement"] = False
+    model = build_model(config)
+    model.eval()
+
+    with torch.no_grad():
+        output = model(torch.randn(1, 3, 114, 64), return_intermediates=True)
+
+    assert torch.equal(output["alpha"], torch.ones_like(output["alpha"]))
+    assert torch.allclose(output["pose"], output["P_base"] + output["Delta_P"])
+
+
+def test_trainable_groups_freeze_unlisted_parameters() -> None:
+    from train import build_model, load_config
+
+    config = load_config(REPO_ROOT / "configs" / "baseline.yaml")
+    config["trainable_groups"] = ["pose_head"]
+    model = build_model(config)
+    trainable = {name for name, param in model.named_parameters() if param.requires_grad}
+
+    assert trainable
+    assert all(name.startswith("pose_head.") for name in trainable)
+    assert not any(name.startswith("stem.") for name in trainable)
+
+
+def test_disabling_fine_branch_skips_fine_encoder_compute() -> None:
+    from train import build_model, load_config
+
+    class FailingModule(nn.Module):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            raise AssertionError("fine branch should not run")
+
+    config = load_config(REPO_ROOT / "configs" / "wm_wiflow.yaml")
+    config["model"]["fine_branch"] = False
+    config["model"]["graph_refinement"] = False
+    model = build_model(config)
+    model.encoder.fine_spatial_encoder = FailingModule()
+    model.eval()
+
+    with torch.no_grad():
+        output = model(torch.randn(1, 3, 114, 64), return_intermediates=True)
+
+    assert output["fine_tokens"] is None
+    assert torch.equal(output["pose"], output["P_base"])
+
+
+def test_graph_refinement_keeps_base_plus_gated_residual_formula() -> None:
+    from train import build_model, load_config
+
+    config = load_config(REPO_ROOT / "configs" / "wm_wiflow.yaml")
+    config["model"]["graph_refinement"] = True
+    model = build_model(config)
+    model.eval()
+
+    with torch.no_grad():
+        output = model(torch.randn(1, 3, 114, 64), return_intermediates=True)
+
+    assert "pre_graph_pose" not in output
+    assert torch.allclose(output["pose"], output["P_base"] + output["alpha"] * output["Delta_P"])

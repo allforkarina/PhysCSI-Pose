@@ -13,9 +13,13 @@ class ScaleAwareJointDecoder(nn.Module):
         num_heads: int = 8,
         coarse_layers: int = 2,
         fine_layers: int = 2,
+        use_gate: bool = True,
         gate_initial_bias: float = -2.0,
+        joint_refiner: nn.Module | None = None,
     ) -> None:
         super().__init__()
+        self.use_gate = use_gate
+        self.joint_refiner = joint_refiner
         self.joint_queries = nn.Parameter(torch.randn(num_joints, d_model) * 0.02)
         self.coarse_layers = nn.ModuleList(
             [_CrossAttentionBlock(d_model=d_model, num_heads=num_heads) for _ in range(coarse_layers)]
@@ -52,9 +56,11 @@ class ScaleAwareJointDecoder(nn.Module):
         z_coarse = queries
         for layer in self.coarse_layers:
             z_coarse = layer(z_coarse, coarse_tokens)
-        p_base = self.base_head(z_coarse)
 
         if fine_tokens is None:
+            if self.joint_refiner is not None:
+                z_coarse = self.joint_refiner(z_coarse)
+            p_base = self.base_head(z_coarse)
             z_fine = torch.zeros_like(z_coarse)
             delta_p = torch.zeros_like(p_base)
             alpha = p_base.new_zeros(batch, self.joint_queries.shape[0], 1)
@@ -75,8 +81,15 @@ class ScaleAwareJointDecoder(nn.Module):
         z_fine = self.fine_query_norm(queries + z_coarse)
         for layer in self.fine_layers:
             z_fine = layer(z_fine, fine_tokens)
+        if self.joint_refiner is not None:
+            z_coarse = self.joint_refiner(z_coarse)
+            z_fine = self.joint_refiner(z_fine)
+        p_base = self.base_head(z_coarse)
         delta_p = self.residual_head(z_fine)
-        alpha = self.gate(torch.cat([z_coarse, z_fine, queries], dim=-1))
+        if self.use_gate:
+            alpha = self.gate(torch.cat([z_coarse, z_fine, queries], dim=-1))
+        else:
+            alpha = p_base.new_ones(batch, self.joint_queries.shape[0], 1)
         return {
             "Z_coarse": z_coarse,
             "Z_fine": z_fine,

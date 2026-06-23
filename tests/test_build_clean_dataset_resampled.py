@@ -66,6 +66,34 @@ def run_builder(csi_root: Path, gt_root: Path, output_root: Path) -> subprocess.
     )
 
 
+def run_builder_with_default_gt_range(csi_root: Path, gt_root: Path, output_root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(BUILD_SCRIPT),
+            "--csi-root",
+            str(csi_root),
+            "--gt-root",
+            str(gt_root),
+            "--output-root",
+            str(output_root),
+            "--expected-csi-shape",
+            "3,4,5",
+            "--expected-gt-shape",
+            "2,17,3",
+            "--expected-frames",
+            "2",
+            "--resample-time-steps",
+            "8",
+            "--overwrite",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def test_build_clean_dataset_writes_resampled_model_ready_layout(tmp_path: Path) -> None:
     dataset_root = tmp_path / "dataset"
     csi_root = dataset_root / "dataset"
@@ -95,3 +123,22 @@ def test_build_clean_dataset_writes_resampled_model_ready_layout(tmp_path: Path)
     assert manifest["resampled_csi_shape"] == [3, 4, 8]
     assert manifest["resample_method"] == "scipy.signal.resample"
     assert manifest["training_io"]["x_file"] == "X_amp_resampled.npy"
+
+
+def test_build_clean_dataset_uses_fixed_gt_range_by_default(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    csi_root = dataset_root / "dataset"
+    gt_root = dataset_root / "ground_truth_npy"
+    output_root = dataset_root / "clean_dataset"
+    gt_root.mkdir(parents=True)
+    write_gt(gt_root / "E01_S01_A01.npy")
+    write_csi_frame(csi_root / "A01" / "S01" / "wifi-csi" / "frame001.mat", offset=0.0)
+    write_csi_frame(csi_root / "A01" / "S01" / "wifi-csi" / "frame002.mat", offset=10.0)
+
+    result = run_builder_with_default_gt_range(csi_root, gt_root, output_root)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    manifest = json.loads((output_root / "clean_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["gt_source_range_policy"] == "fixed"
+    assert manifest["gt_source_range"]["x_min"] == -1.0
+    assert manifest["gt_source_range"]["x_max"] == 1.0

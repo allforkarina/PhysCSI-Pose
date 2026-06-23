@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Sequence
 
 import numpy as np
 import pywt
@@ -9,12 +10,20 @@ from torch import nn
 
 
 class TemporalSWTFeatureBank(nn.Module):
-    def __init__(self, *, wavelet: str = "db2", levels: int = 3) -> None:
+    VALID_BANDS = ("raw", "A3", "D3", "D2", "D1")
+
+    def __init__(self, *, wavelet: str = "db2", levels: int = 3, bands: Sequence[str] | None = None) -> None:
         super().__init__()
         self.wavelet = wavelet
         self.levels = int(levels)
         if self.levels <= 0:
             raise ValueError(f"levels must be positive, got {levels}")
+        if self.levels != 3:
+            raise ValueError("TemporalSWTFeatureBank currently names bands for levels=3")
+        self.bands = tuple(bands or self.VALID_BANDS)
+        unknown = set(self.bands) - set(self.VALID_BANDS)
+        if unknown:
+            raise ValueError(f"unknown wavelet bands: {sorted(unknown)}")
 
     def forward(self, x: torch.Tensor) -> "OrderedDict[str, torch.Tensor]":
         if x.ndim != 4:
@@ -24,16 +33,14 @@ class TemporalSWTFeatureBank(nn.Module):
 
         source = x.detach().cpu().numpy()
         coeffs = pywt.swt(source, self.wavelet, level=self.levels, axis=-1, trim_approx=False)
-        approx = coeffs[-1][0]
-        details = {f"D{level}": coeffs[level - 1][1] for level in range(1, self.levels + 1)}
-        tensors = OrderedDict(
-            [
-                ("raw", x),
-                (f"A{self.levels}", self._to_tensor(approx, x)),
-            ]
-        )
-        for level in range(self.levels, 0, -1):
-            tensors[f"D{level}"] = self._to_tensor(details[f"D{level}"], x)
+        by_band = {
+            "raw": x,
+            "A3": self._to_tensor(coeffs[0][0], x),
+            "D3": self._to_tensor(coeffs[0][1], x),
+            "D2": self._to_tensor(coeffs[1][1], x),
+            "D1": self._to_tensor(coeffs[2][1], x),
+        }
+        tensors = OrderedDict((band, by_band[band]) for band in self.bands)
         return tensors
 
     @staticmethod
