@@ -136,6 +136,32 @@ def test_source_splits_assign_each_subject_to_exactly_one_split(tmp_path: Path) 
             assert set(subject_indices).issubset(set(dataset.indices.tolist()))
 
 
+def test_ten_subject_source_environment_uses_fixed_7_1_2_subject_split(tmp_path: Path) -> None:
+    from data.memmap_dataset import MemmapDataset
+
+    data_dir = tmp_path / "memmap"
+    subjects = tuple(f"S{i:02d}" for i in range(1, 11))
+    _write_subject_env_memmap_dataset(
+        data_dir,
+        envs=("env1",),
+        subjects=subjects,
+        frames_per_subject=2,
+    )
+
+    datasets = {
+        split: MemmapDataset(data_dir, split=split, envs=("env1",), seed=999)
+        for split in ("train", "val", "test")
+    }
+    subjects_by_split = {
+        split: sorted({str(dataset._samples[idx]) for idx in dataset.indices})
+        for split, dataset in datasets.items()
+    }
+
+    assert subjects_by_split["train"] == ["S01", "S02", "S03", "S04", "S05", "S06", "S07"]
+    assert subjects_by_split["val"] == ["S08"]
+    assert subjects_by_split["test"] == ["S09", "S10"]
+
+
 def test_create_few_shot_data_loader_returns_only_train_loader_and_indices(tmp_path: Path) -> None:
     from dataloader import create_few_shot_data_loader
 

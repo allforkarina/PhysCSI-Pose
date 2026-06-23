@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import torch
 from torch import nn
 
@@ -14,6 +15,7 @@ from train import (
     ALIGN_LOSSES,
     TrainConfig,
     _flatten_alignment_feature,
+    _resolve_source_subject_splits,
     coral_loss,
     compute_alignment_loss,
     parse_args,
@@ -125,3 +127,34 @@ def test_parse_args_accepts_finetune_align_options() -> None:
     assert args.align_loss == "coral"
     assert args.align_layer == "axial"
     assert args.align_weight == 0.1
+
+
+def test_source_subject_splits_require_exactly_one_source_environment(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="exactly one source environment"):
+        _resolve_source_subject_splits(tmp_path, None)
+    with pytest.raises(ValueError, match="exactly one source environment"):
+        _resolve_source_subject_splits(tmp_path, ("env1", "env2"))
+
+
+def test_source_subject_splits_return_fixed_7_1_2_subject_sets(tmp_path: Path) -> None:
+    import numpy as np
+
+    data_dir = tmp_path / "memmap"
+    data_dir.mkdir()
+    subjects = [f"S{i:02d}" for i in range(1, 11)]
+    samples = np.array(subjects)
+    envs = np.array(["env1"] * len(subjects))
+    actions = np.array(["A01"] * len(subjects))
+    frame_idx = np.arange(1, len(subjects) + 1)
+    csi = np.zeros((len(subjects), 64, 3, 114), dtype=np.float32)
+    keypoints = np.zeros((len(subjects), 17, 2), dtype=np.float32)
+    for name in ("csi_gminmax.npy", "csi_gzscore.npy", "csi_zscore.npy"):
+        np.save(data_dir / name, csi)
+    np.save(data_dir / "ground_truth.npy", keypoints)
+    np.savez(data_dir / "meta.npz", environment=envs, sample=samples, action=actions, frame_idx=frame_idx)
+
+    splits = _resolve_source_subject_splits(data_dir, ("env1",))
+
+    assert splits["train"] == ("S01", "S02", "S03", "S04", "S05", "S06", "S07")
+    assert splits["val"] == ("S08",)
+    assert splits["test"] == ("S09", "S10")

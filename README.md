@@ -44,8 +44,8 @@ The memmap CSI tensor is built from raw `CSIamp` shaped `[3, 114, 10]`, Fourier-
 
 For source-only training, split selection is strictly ordered:
 
-1. Filter by source environment first, for example `--source-envs env1`.
-2. Split subjects within that environment into train, val, and test.
+1. Select exactly one source environment, for example `--source-envs env1`.
+2. Split subjects within that environment into 7 train subjects, 1 val subject, and 2 test subjects.
 3. Assign every action/trial/frame for a subject to exactly one split.
 
 Do not randomly split frames from the same subject across train, val, and test.

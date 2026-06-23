@@ -462,6 +462,36 @@ def select_device(device_name: str) -> torch.device:
     return torch.device(device_name)
 
 
+def _resolve_source_subject_splits(
+    dataset_root: str | Path,
+    source_envs: tuple[str, ...] | None,
+) -> dict[str, tuple[str, ...]]:
+    if source_envs is None or len(source_envs) != 1:
+        raise ValueError("source_only mode requires exactly one source environment, e.g. --source-envs env1")
+
+    source_env = source_envs[0]
+    meta = np.load(str(Path(dataset_root) / "meta.npz"), allow_pickle=True)
+    environments = [str(env) for env in meta["environment"]]
+    subjects = [str(subject) for subject in meta["sample"]]
+    source_subjects = sorted({
+        subject
+        for env, subject in zip(environments, subjects)
+        if env == source_env
+    })
+
+    if len(source_subjects) != 10:
+        raise ValueError(
+            f"source_only mode expects exactly 10 subjects in {source_env} for a 7/1/2 split, "
+            f"found {len(source_subjects)}"
+        )
+
+    return {
+        "train": tuple(source_subjects[:7]),
+        "val": tuple(source_subjects[7:8]),
+        "test": tuple(source_subjects[8:10]),
+    }
+
+
 def _normalization_parameter_names(model: nn.Module) -> set[str]:
     names: set[str] = set()
     for module_name, module in model.named_modules():
@@ -587,7 +617,8 @@ def apply_finetune_tier(model: nn.Module, tier: int = 1) -> int:
 
 
 def _run_source_only(config: TrainConfig, device: torch.device, output_dir: Path) -> None:
-    envs = config.source_envs if config.source_envs else None
+    subject_splits = _resolve_source_subject_splits(config.dataset_root, config.source_envs)
+    envs = config.source_envs
     loaders: dict[str, DataLoader] = {}
     for split in ("train", "val", "test"):
         loaders[split] = create_memmap_data_loader(
@@ -595,9 +626,16 @@ def _run_source_only(config: TrainConfig, device: torch.device, output_dir: Path
             split=split,
             batch_size=config.batch_size,
             envs=envs,
+            train_subjects=subject_splits["train"],
+            val_subjects=subject_splits["val"],
+            test_subjects=subject_splits["test"],
             num_workers=config.num_workers,
             seed=config.seed,
         )
+    print(
+        "Source subject split: "
+        f"train={subject_splits['train']}, val={subject_splits['val']}, test={subject_splits['test']}"
+    )
 
     train_loader = maybe_subset_loader(loaders["train"], config.subset_size)
     val_loader = maybe_subset_loader(loaders["val"], config.subset_size)
@@ -995,7 +1033,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--source-envs", nargs="*", default=None, help="Source environment names")
+    parser.add_argument(
+        "--source-envs",
+        nargs="*",
+        default=None,
+        help="Source environment names. source_only mode requires exactly one environment.",
+    )
     parser.add_argument("--target-envs", nargs="*", default=None, help="Target environment names")
     parser.add_argument("--finetune-from", default=None, help="Path to source checkpoint for finetune")
     parser.add_argument("--few-shot-subjects", type=int, default=4)

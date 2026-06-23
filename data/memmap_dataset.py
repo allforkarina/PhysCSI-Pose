@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from pathlib import Path
 from typing import Iterable
 
@@ -34,7 +33,7 @@ class MemmapDataset(Dataset):
         train_subjects: Iterable[str] | None = None,
         val_subjects: Iterable[str] | None = None,
         test_subjects: Iterable[str] | None = None,
-        random_val_ratio: float = 0.2,
+        random_val_ratio: float = 0.1,
         random_test_ratio: float = 0.2,
         seed: int = 42,
         normalize: str = "global_minmax",
@@ -104,16 +103,19 @@ class MemmapDataset(Dataset):
             if subject_set is not None:
                 return np.asarray(sorted(candidate_indices), dtype=np.int64)
 
-            rng = random.Random(seed)
             grouped: dict[str, list[int]] = {}
             for idx in candidate_indices:
                 grouped.setdefault(sample_list[idx], []).append(idx)
 
             subjects = sorted(grouped)
-            rng.shuffle(subjects)
             n_subjects = len(subjects)
-            test_count = min(n_subjects, int(round(n_subjects * random_test_ratio)))
-            val_count = min(n_subjects - test_count, int(round(n_subjects * random_val_ratio)))
+            test_count = int(round(n_subjects * random_test_ratio))
+            val_count = int(np.ceil(n_subjects * random_val_ratio))
+            if n_subjects >= 3:
+                test_count = max(1, test_count)
+                val_count = max(1, val_count)
+            test_count = min(n_subjects, test_count)
+            val_count = min(n_subjects - test_count, val_count)
             train_count = n_subjects - val_count - test_count
             split_subjects = {
                 "train": set(subjects[:train_count]),

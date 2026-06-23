@@ -52,13 +52,13 @@ pytest
 Run a quick training sanity check:
 
 ```powershell
-python train.py --mode source_only --dataset-root data\mmfi_pose --epochs 5 --subset-size 32 --output-dir outputs\sanity
+python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --epochs 5 --subset-size 32 --output-dir outputs\sanity
 ```
 
 Run the default training configuration:
 
 ```powershell
-python train.py --mode source_only --dataset-root data\mmfi_pose --epochs 50 --batch-size 64 --output-dir outputs\train
+python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --epochs 50 --batch-size 64 --output-dir outputs\train
 ```
 
 The default training configuration uses CSI amplitude input (3 channels), `OneCycleLR`, gradient clipping, `coord_l1 + 0.5 * bone_l1`, the baseline axial mode `spatial_then_temporal`, and AdamW weight decay.
@@ -66,13 +66,13 @@ The default training configuration uses CSI amplitude input (3 channels), `OneCy
 Run an axial-attention encoder ablation:
 
 ```powershell
-python train.py --mode source_only --dataset-root data\mmfi_pose --axial-mode temporal_then_spatial --epochs 50 --batch-size 64 --output-dir outputs\train_temporal_then_spatial
+python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --axial-mode temporal_then_spatial --epochs 50 --batch-size 64 --output-dir outputs\train_temporal_then_spatial
 ```
 
 Run a hierarchical decoder ablation:
 
 ```powershell
-python train.py --mode source_only --dataset-root data\mmfi_pose --decoder-type hierarchical --epochs 50 --batch-size 64 --output-dir outputs\train_hierarchical_decoder
+python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --decoder-type hierarchical --epochs 50 --batch-size 64 --output-dir outputs\train_hierarchical_decoder
 ```
 
 Supported `--axial-mode` values are `spatial_then_temporal`, `temporal_then_spatial`, `parallel_sum`, and `parallel_concat`. Supported `--decoder-type` values are `joint` and `hierarchical`. Checkpoints store the selected mode, decoder type, and settings in `train_config`, and evaluation rebuilds the model from that saved configuration.
@@ -85,7 +85,7 @@ python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\train\best_val
 
 `eval.py` evaluates `--eval-split test` by default. Use `--eval-split all` only when you intentionally evaluate a full environment subset, such as target-domain few-shot evaluation with excluded training frames.
 
-Source-only runs first filter by `--source-envs`, then split subjects inside those environments into train/val/test. A subject's actions, trials, and frames must stay in exactly one split; never split one subject's frames across train/val/test.
+Source-only runs require exactly one `--source-envs` value, then split subjects inside that environment into 7 train, 1 val, and 2 test subjects. A subject's actions, trials, and frames must stay in exactly one split; never split one subject's frames across train/val/test.
 
 ### Cross-Domain Few-Shot Finetune Pipeline
 
