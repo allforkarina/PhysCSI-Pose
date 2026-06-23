@@ -34,6 +34,7 @@ class MemmapDataset(Dataset):
         train_subjects: Iterable[str] | None = None,
         test_subjects: Iterable[str] | None = None,
         random_val_ratio: float = 0.2,
+        random_test_ratio: float = 0.2,
         seed: int = 42,
         normalize: str = "global_minmax",
     ) -> None:
@@ -57,7 +58,7 @@ class MemmapDataset(Dataset):
         self._actions = meta["action"]
 
         self.indices = self._build_split(
-            split, envs, train_subjects, test_subjects, random_val_ratio, seed
+            split, envs, train_subjects, test_subjects, random_val_ratio, random_test_ratio, seed
         )
 
     def _build_split(
@@ -67,6 +68,7 @@ class MemmapDataset(Dataset):
         train_subjects: Iterable[str] | None,
         test_subjects: Iterable[str] | None,
         random_val_ratio: float,
+        random_test_ratio: float,
         seed: int,
     ) -> np.ndarray:
         num_total = len(self._samples)
@@ -74,7 +76,12 @@ class MemmapDataset(Dataset):
         sample_list = [str(s) for s in self._samples]
 
         env_set = set(envs) if envs else None
-        subject_set = set(train_subjects) if train_subjects else None
+        if split == "test" and test_subjects is not None:
+            subject_set = set(test_subjects)
+        elif split in {"train", "val"} and train_subjects is not None:
+            subject_set = set(train_subjects)
+        else:
+            subject_set = None
 
         candidate_indices: list[int] = []
         for i in range(num_total):
@@ -92,17 +99,23 @@ class MemmapDataset(Dataset):
 
             train_indices: list[int] = []
             val_indices: list[int] = []
+            test_indices: list[int] = []
             for subject, indices in sorted(grouped.items()):
                 shuffled = indices[:]
                 rng.shuffle(shuffled)
-                pivot = int(round(len(shuffled) * (1.0 - random_val_ratio)))
-                train_indices.extend(shuffled[:pivot])
-                val_indices.extend(shuffled[pivot:])
+                n = len(shuffled)
+                test_count = min(n, int(round(n * random_test_ratio)))
+                val_count = min(n - test_count, int(round(n * random_val_ratio)))
+                train_count = n - val_count - test_count
+                train_indices.extend(shuffled[:train_count])
+                val_indices.extend(shuffled[train_count:train_count + val_count])
+                test_indices.extend(shuffled[train_count + val_count:])
 
             if split == "train":
                 return np.asarray(sorted(train_indices), dtype=np.int64)
-            else:
+            if split == "val":
                 return np.asarray(sorted(val_indices), dtype=np.int64)
+            return np.asarray(sorted(test_indices), dtype=np.int64)
 
         return np.asarray(sorted(candidate_indices), dtype=np.int64)
 

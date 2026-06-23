@@ -716,7 +716,7 @@ def _run_finetune(config: TrainConfig, device: torch.device, output_dir: Path) -
     if not target_envs:
         raise ValueError("--target-envs required for finetune mode")
 
-    train_loader, val_loader, train_indices = create_few_shot_data_loader(
+    train_loader, train_indices = create_few_shot_data_loader(
         data_dir=config.dataset_root,
         target_envs=target_envs,
         few_shot_subjects=config.few_shot_subjects,
@@ -725,7 +725,7 @@ def _run_finetune(config: TrainConfig, device: torch.device, output_dir: Path) -
         num_workers=config.num_workers,
         seed=config.seed,
     )
-    print(f"Few-shot train: {len(train_indices)} frames, val: {len(val_loader.dataset)} frames")
+    print(f"Few-shot train: {len(train_indices)} frames")
 
     indices_path = output_dir / "few_shot_train_indices.npy"
     indices_path.parent.mkdir(parents=True, exist_ok=True)
@@ -835,7 +835,7 @@ def _run_finetune_align(config: TrainConfig, device: torch.device, output_dir: P
         seed=config.seed,
     )
     source_loader = maybe_subset_loader(source_loader, config.subset_size)
-    target_loader, target_val_loader, train_indices = create_few_shot_data_loader(
+    target_loader, train_indices = create_few_shot_data_loader(
         data_dir=config.dataset_root,
         target_envs=target_envs,
         few_shot_subjects=config.few_shot_subjects,
@@ -846,8 +846,7 @@ def _run_finetune_align(config: TrainConfig, device: torch.device, output_dir: P
     )
     print(
         f"Source train: {len(source_loader.dataset)} frames; "
-        f"target few-shot train: {len(train_indices)} frames, "
-        f"target val: {len(target_val_loader.dataset)} frames"
+        f"target few-shot train: {len(train_indices)} frames"
     )
 
     indices_path = output_dir / "few_shot_train_indices.npy"

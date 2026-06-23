@@ -3,7 +3,6 @@ from __future__ import annotations
 """NPY memmap-backed dataloader for MM-Fi pose data."""
 
 from pathlib import Path
-from typing import Optional
 
 import torch
 from torch.utils.data import DataLoader, Subset
@@ -84,7 +83,7 @@ def create_few_shot_data_loader(
     batch_size: int,
     num_workers: int = 0,
     seed: int = 42,
-) -> tuple[DataLoader, DataLoader, list[int]]:
+) -> tuple[DataLoader, list[int]]:
     full_dataset = MemmapDataset(
         data_dir=data_dir,
         split="all",
@@ -96,9 +95,6 @@ def create_few_shot_data_loader(
         few_shot_frames=few_shot_frames,
     )
     train_dataset = Subset(full_dataset, train_indices)
-    all_indices = list(range(len(full_dataset)))
-    val_indices = [i for i in all_indices if i not in set(train_indices)]
-
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -108,14 +104,4 @@ def create_few_shot_data_loader(
         pin_memory=True,
         persistent_workers=num_workers > 0,
     )
-    val_dataset = Subset(full_dataset, val_indices)
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        collate_fn=memmap_collate_fn,
-        pin_memory=True,
-        persistent_workers=num_workers > 0,
-    )
-    return train_loader, val_loader, train_indices
+    return train_loader, train_indices

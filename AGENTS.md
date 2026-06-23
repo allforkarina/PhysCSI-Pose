@@ -83,6 +83,8 @@ Evaluate one checkpoint:
 python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\train\best_val_mpjpe.pth --output-dir outputs\eval
 ```
 
+`eval.py` evaluates `--eval-split test` by default. Use `--eval-split all` only when you intentionally evaluate a full environment subset, such as target-domain few-shot evaluation with excluded training frames.
+
 ### Cross-Domain Few-Shot Finetune Pipeline
 
 ```powershell
@@ -96,7 +98,7 @@ python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\source_baselin
 python train.py --mode finetune --dataset-root data\mmfi_pose --target-envs env2 --output-dir outputs\finetune --finetune-from outputs\source_baseline\best_val_mpjpe.pth --trainable-groups encoder --few-shot-subjects 4 --few-shot-frames 5 --epochs 30
 
 # Phase 4: Post-FT Evaluation
-python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\finetune\best_train_loss.pth --eval-envs env2 --output-dir outputs\finetune_eval --exclude-indices outputs\finetune\few_shot_train_indices.npy
+python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\finetune\best_train_loss.pth --eval-envs env2 --eval-split all --output-dir outputs\finetune_eval --exclude-indices outputs\finetune\few_shot_train_indices.npy
 ```
 
 Run trainable-group finetune ablations with independent parameter sets rather than cumulative tier unlocking:

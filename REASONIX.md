@@ -28,11 +28,12 @@ python scripts\build_memmap.py --src D:\path\to\raw\dataset --dst data\mmfi_pose
 python train.py --mode source_only --dataset-root data\mmfi_pose --epochs 50 --batch-size 64 --output-dir outputs\train
 # Evaluate
 python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\train\best_val_mpjpe.pth --output-dir outputs\eval
+# eval.py defaults to --eval-split test; use --eval-split all only for explicit full-subset evaluation.
 
 # Few-shot cross-domain
 python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --output-dir outputs\source --epochs 50
 python train.py --mode finetune --dataset-root data\mmfi_pose --target-envs env2 --output-dir outputs\finetune --finetune-from outputs\source\best_val_mpjpe.pth --few-shot-subjects 4 --few-shot-frames 5 --epochs 30
-python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\finetune\best_train_loss.pth --eval-envs env2 --output-dir outputs\ft_eval --exclude-indices outputs\finetune\few_shot_train_indices.npy
+python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\finetune\best_train_loss.pth --eval-envs env2 --eval-split all --output-dir outputs\ft_eval --exclude-indices outputs\finetune\few_shot_train_indices.npy
 
 # Tests
 pytest

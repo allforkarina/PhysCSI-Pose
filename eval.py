@@ -349,6 +349,12 @@ def parse_args() -> argparse.Namespace:
         help="Filter by environment names (e.g., --eval-envs env1 env2). Evaluates all if not set.",
     )
     parser.add_argument(
+        "--eval-split",
+        choices=("test", "val", "train", "all"),
+        default="test",
+        help="Dataset split to evaluate. Use all explicitly for target-domain few-shot evaluation with exclusions.",
+    )
+    parser.add_argument(
         "--exclude-indices", default=None,
         help="Path to .npy file containing frame indices to exclude from evaluation.",
     )
@@ -389,9 +395,14 @@ def main() -> None:
     model = load_checkpoint_model(args.checkpoint, device)
 
     eval_envs = tuple(args.eval_envs) if args.eval_envs else None
+    eval_split = args.eval_split
+    if args.exclude_indices and eval_split != "all":
+        print("Error: --exclude-indices requires --eval-split all", file=sys.stderr)
+        sys.exit(2)
+
     test_dataset = MemmapDataset(
         data_dir=args.dataset_root,
-        split="all",
+        split=eval_split,
         envs=eval_envs,
     )
 
@@ -415,7 +426,13 @@ def main() -> None:
     # --- single-pass evaluation ---
     result = run_evaluation(model, test_loader, device)
 
-    print("--- Test Metrics ---")
+    split_labels = {
+        "test": "Test",
+        "val": "Validation",
+        "train": "Train",
+        "all": "All",
+    }
+    print(f"--- {split_labels[eval_split]} Metrics ---")
     for name in sorted(result["overall"]):
         print(f"  {name}: {result['overall'][name]:.6f}")
 
@@ -437,7 +454,7 @@ def main() -> None:
         print("\n--- Pose Joint Scatter Visualization ---")
         viz_dataset = MemmapDataset(
             data_dir=args.dataset_root,
-            split="all",
+            split=eval_split,
             envs=eval_envs,
         )
         run_pose_visualization(
