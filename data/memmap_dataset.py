@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Iterable
 
@@ -13,6 +14,7 @@ CSI_FILES = {
     "global_zscore": "csi_gzscore.npy",
     "zscore": "csi_zscore.npy",
 }
+SPLIT_STRATEGIES = ("subject", "frame_random")
 
 
 class MemmapDataset(Dataset):
@@ -37,11 +39,17 @@ class MemmapDataset(Dataset):
         random_test_ratio: float = 0.2,
         seed: int = 42,
         normalize: str = "global_minmax",
+        split_strategy: str = "subject",
     ) -> None:
         if split not in {"train", "val", "test", "all"}:
             raise ValueError(f"split must be train/val/test/all, got {split}")
+        if split_strategy not in SPLIT_STRATEGIES:
+            raise ValueError(
+                f"Unknown split_strategy: {split_strategy}, expected one of {SPLIT_STRATEGIES}"
+            )
         self.split = split
         self.normalize = normalize
+        self.split_strategy = split_strategy
 
         data_dir = Path(data_dir)
 
@@ -66,6 +74,7 @@ class MemmapDataset(Dataset):
             random_val_ratio,
             random_test_ratio,
             seed,
+            split_strategy,
         )
 
     def _build_split(
@@ -78,6 +87,7 @@ class MemmapDataset(Dataset):
         random_val_ratio: float,
         random_test_ratio: float,
         seed: int,
+        split_strategy: str,
     ) -> np.ndarray:
         num_total = len(self._samples)
         env_list = [str(e) for e in self._envs]
@@ -89,7 +99,7 @@ class MemmapDataset(Dataset):
             "val": set(val_subjects) if val_subjects is not None else None,
             "test": set(test_subjects) if test_subjects is not None else None,
         }
-        subject_set = explicit_subjects.get(split)
+        subject_set = explicit_subjects.get(split) if split_strategy == "subject" else None
 
         candidate_indices: list[int] = []
         for i in range(num_total):
@@ -99,48 +109,59 @@ class MemmapDataset(Dataset):
                 continue
             candidate_indices.append(i)
 
-        if split != "all":
-            if subject_set is not None:
-                return np.asarray(sorted(candidate_indices), dtype=np.int64)
+        if split == "all":
+            return np.asarray(sorted(candidate_indices), dtype=np.int64)
+        if subject_set is not None:
+            return np.asarray(sorted(candidate_indices), dtype=np.int64)
 
-            grouped: dict[str, list[int]] = {}
-            for idx in candidate_indices:
-                grouped.setdefault(sample_list[idx], []).append(idx)
+        grouped: dict[str, list[int]] = {}
+        for idx in candidate_indices:
+            grouped.setdefault(sample_list[idx], []).append(idx)
 
-            subjects = sorted(grouped)
-            n_subjects = len(subjects)
-            test_count = int(round(n_subjects * random_test_ratio))
-            val_count = int(np.ceil(n_subjects * random_val_ratio))
-            if n_subjects >= 3:
-                test_count = max(1, test_count)
-                val_count = max(1, val_count)
-            test_count = min(n_subjects, test_count)
-            val_count = min(n_subjects - test_count, val_count)
-            train_count = n_subjects - val_count - test_count
-            split_subjects = {
-                "train": set(subjects[:train_count]),
-                "val": set(subjects[train_count:train_count + val_count]),
-                "test": set(subjects[train_count + val_count:]),
+        if split_strategy == "frame_random":
+            rng = random.Random(seed)
+            split_indices: dict[str, list[int]] = {
+                "train": [],
+                "val": [],
+                "test": [],
             }
+            for subject in sorted(grouped):
+                shuffled = grouped[subject][:]
+                rng.shuffle(shuffled)
+                count = len(shuffled)
+                test_count = min(count, int(round(count * random_test_ratio)))
+                val_count = min(count - test_count, int(round(count * random_val_ratio)))
+                train_count = count - val_count - test_count
+                split_indices["train"].extend(shuffled[:train_count])
+                split_indices["val"].extend(
+                    shuffled[train_count:train_count + val_count]
+                )
+                split_indices["test"].extend(shuffled[train_count + val_count:])
+            return np.asarray(sorted(split_indices[split]), dtype=np.int64)
 
-            train_indices: list[int] = []
-            val_indices: list[int] = []
-            test_indices: list[int] = []
-            for subject, indices in grouped.items():
-                if subject in split_subjects["train"]:
-                    train_indices.extend(indices)
-                elif subject in split_subjects["val"]:
-                    val_indices.extend(indices)
-                elif subject in split_subjects["test"]:
-                    test_indices.extend(indices)
+        subjects = sorted(grouped)
+        n_subjects = len(subjects)
+        test_count = int(round(n_subjects * random_test_ratio))
+        val_count = int(np.ceil(n_subjects * random_val_ratio))
+        if n_subjects >= 3:
+            test_count = max(1, test_count)
+            val_count = max(1, val_count)
+        test_count = min(n_subjects, test_count)
+        val_count = min(n_subjects - test_count, val_count)
+        train_count = n_subjects - val_count - test_count
+        split_subjects = {
+            "train": set(subjects[:train_count]),
+            "val": set(subjects[train_count:train_count + val_count]),
+            "test": set(subjects[train_count + val_count:]),
+        }
 
-            if split == "train":
-                return np.asarray(sorted(train_indices), dtype=np.int64)
-            if split == "val":
-                return np.asarray(sorted(val_indices), dtype=np.int64)
-            return np.asarray(sorted(test_indices), dtype=np.int64)
-
-        return np.asarray(sorted(candidate_indices), dtype=np.int64)
+        split_indices = {"train": [], "val": [], "test": []}
+        for subject, indices in grouped.items():
+            for split_name, selected_subjects in split_subjects.items():
+                if subject in selected_subjects:
+                    split_indices[split_name].extend(indices)
+                    break
+        return np.asarray(sorted(split_indices[split]), dtype=np.int64)
 
     def _sample_few_shot(
         self,

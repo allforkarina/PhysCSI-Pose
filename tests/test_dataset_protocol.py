@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -160,6 +161,92 @@ def test_ten_subject_source_environment_uses_fixed_7_1_2_subject_split(tmp_path:
     assert subjects_by_split["train"] == ["S01", "S02", "S03", "S04", "S05", "S06", "S07"]
     assert subjects_by_split["val"] == ["S08"]
     assert subjects_by_split["test"] == ["S09", "S10"]
+
+
+def test_frame_random_split_is_disjoint_complete_and_70_10_20_per_subject(
+    tmp_path: Path,
+) -> None:
+    from data.memmap_dataset import MemmapDataset
+
+    data_dir = tmp_path / "memmap"
+    subjects = ("S01", "S02", "S03")
+    _write_subject_env_memmap_dataset(
+        data_dir,
+        envs=("env1",),
+        subjects=subjects,
+        frames_per_subject=10,
+    )
+    datasets = {
+        split: MemmapDataset(
+            data_dir,
+            split=split,
+            envs=("env1",),
+            split_strategy="frame_random",
+            seed=123,
+        )
+        for split in ("train", "val", "test")
+    }
+
+    split_indices = {
+        name: set(dataset.indices.tolist())
+        for name, dataset in datasets.items()
+    }
+    assert split_indices["train"].isdisjoint(split_indices["val"])
+    assert split_indices["train"].isdisjoint(split_indices["test"])
+    assert split_indices["val"].isdisjoint(split_indices["test"])
+    assert set().union(*split_indices.values()) == set(range(30))
+
+    for dataset in datasets.values():
+        assert {str(dataset._samples[idx]) for idx in dataset.indices} == set(subjects)
+    assert len(datasets["train"]) == 21
+    assert len(datasets["val"]) == 3
+    assert len(datasets["test"]) == 6
+
+
+def test_frame_random_split_is_seeded_and_filters_environment_first(tmp_path: Path) -> None:
+    from data.memmap_dataset import MemmapDataset
+
+    data_dir = tmp_path / "memmap"
+    _write_subject_env_memmap_dataset(
+        data_dir,
+        envs=("env1", "env2"),
+        subjects=("S01", "S02"),
+        frames_per_subject=10,
+    )
+    first = MemmapDataset(
+        data_dir,
+        split="train",
+        envs=("env1",),
+        split_strategy="frame_random",
+        seed=7,
+    )
+    repeated = MemmapDataset(
+        data_dir,
+        split="train",
+        envs=("env1",),
+        split_strategy="frame_random",
+        seed=7,
+    )
+    changed = MemmapDataset(
+        data_dir,
+        split="train",
+        envs=("env1",),
+        split_strategy="frame_random",
+        seed=8,
+    )
+
+    assert np.array_equal(first.indices, repeated.indices)
+    assert not np.array_equal(first.indices, changed.indices)
+    assert {str(first._envs[idx]) for idx in first.indices} == {"env1"}
+
+
+def test_memmap_dataset_rejects_unknown_split_strategy(tmp_path: Path) -> None:
+    from data.memmap_dataset import MemmapDataset
+
+    data_dir = tmp_path / "memmap"
+    _write_memmap_dataset(data_dir)
+    with pytest.raises(ValueError, match="split_strategy"):
+        MemmapDataset(data_dir, split_strategy="unknown")
 
 
 def test_create_few_shot_data_loader_returns_only_train_loader_and_indices(tmp_path: Path) -> None:
