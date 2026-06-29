@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import eval as eval_module
 import train
 from train import TrainConfig
 
@@ -51,3 +52,41 @@ def test_train_parser_rejects_unknown_split_strategy(monkeypatch) -> None:
 
     with pytest.raises(SystemExit):
         train.parse_args()
+
+
+@pytest.mark.parametrize("strategy", ("subject", "frame_random"))
+def test_eval_parser_accepts_split_strategy(monkeypatch, strategy: str) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "eval.py",
+            "--dataset-root",
+            "data",
+            "--checkpoint",
+            "model.pth",
+            "--split-strategy",
+            strategy,
+        ],
+    )
+
+    assert eval_module.parse_args().split_strategy == strategy
+
+
+def test_eval_parser_rejects_unknown_split_strategy(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "eval.py",
+            "--dataset-root",
+            "data",
+            "--checkpoint",
+            "model.pth",
+            "--split-strategy",
+            "unknown",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        eval_module.parse_args()

@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from data.memmap_dataset import MemmapDataset
+from data.memmap_dataset import SPLIT_STRATEGIES, MemmapDataset
 from dataloader import create_memmap_data_loader, memmap_collate_fn
 from models import H36M17_JOINT_NAMES, WiFlowModel
 from train import (
@@ -355,6 +355,15 @@ def parse_args() -> argparse.Namespace:
         help="Dataset split to evaluate. Use all explicitly for target-domain few-shot evaluation with exclusions.",
     )
     parser.add_argument(
+        "--split-strategy",
+        default="subject",
+        choices=SPLIT_STRATEGIES,
+        help=(
+            "Source split protocol: subject-disjoint or diagnostic random frames "
+            "within each subject."
+        ),
+    )
+    parser.add_argument(
         "--exclude-indices", default=None,
         help="Path to .npy file containing frame indices to exclude from evaluation.",
     )
@@ -404,6 +413,7 @@ def main() -> None:
         data_dir=args.dataset_root,
         split=eval_split,
         envs=eval_envs,
+        split_strategy=args.split_strategy,
     )
 
     if args.exclude_indices:
@@ -456,6 +466,7 @@ def main() -> None:
             data_dir=args.dataset_root,
             split=eval_split,
             envs=eval_envs,
+            split_strategy=args.split_strategy,
         )
         run_pose_visualization(
             model=model,

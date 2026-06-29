@@ -40,6 +40,7 @@ def _minimal_eval_args(tmp_path: Path, *, eval_split: str) -> Namespace:
         device="cpu",
         eval_envs=None,
         eval_split=eval_split,
+        split_strategy="frame_random",
         exclude_indices=None,
         feature_viz=False,
         pose_viz=False,
@@ -58,8 +59,9 @@ def test_eval_main_uses_test_split_by_default_and_labels_metrics_as_test(
     seen: dict[str, str] = {}
 
     class FakeDataset(torch.utils.data.Dataset):
-        def __init__(self, data_dir, split, envs=None):
+        def __init__(self, data_dir, split, envs=None, split_strategy="subject"):
             seen["split"] = split
+            seen["split_strategy"] = split_strategy
 
         def __len__(self) -> int:
             return 1
@@ -83,6 +85,7 @@ def test_eval_main_uses_test_split_by_default_and_labels_metrics_as_test(
     eval_module.main()
 
     assert seen["split"] == "test"
+    assert seen["split_strategy"] == "frame_random"
     assert "--- Test Metrics ---" in capsys.readouterr().out
 
 
@@ -94,8 +97,9 @@ def test_eval_main_uses_explicit_all_split_and_labels_metrics_as_all(
     seen: dict[str, str] = {}
 
     class FakeDataset(torch.utils.data.Dataset):
-        def __init__(self, data_dir, split, envs=None):
+        def __init__(self, data_dir, split, envs=None, split_strategy="subject"):
             seen["split"] = split
+            seen["split_strategy"] = split_strategy
 
         def __len__(self) -> int:
             return 1
@@ -119,4 +123,5 @@ def test_eval_main_uses_explicit_all_split_and_labels_metrics_as_all(
     eval_module.main()
 
     assert seen["split"] == "all"
+    assert seen["split_strategy"] == "frame_random"
     assert "--- All Metrics ---" in capsys.readouterr().out
