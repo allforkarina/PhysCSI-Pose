@@ -58,7 +58,7 @@ python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs e
 Run the default training configuration:
 
 ```powershell
-python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --epochs 50 --batch-size 64 --output-dir outputs\train
+python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --split-strategy subject --epochs 50 --batch-size 64 --output-dir runs\source_env1_subject
 ```
 
 The default training configuration uses CSI amplitude input (3 channels), `OneCycleLR`, gradient clipping, `coord_l1 + 0.5 * bone_l1`, the baseline axial mode `spatial_then_temporal`, and AdamW weight decay.
@@ -80,12 +80,24 @@ Supported `--axial-mode` values are `spatial_then_temporal`, `temporal_then_spat
 Evaluate one checkpoint:
 
 ```powershell
-python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\train\best_val_mpjpe.pth --output-dir outputs\eval
+python eval.py --dataset-root data\mmfi_pose --checkpoint runs\source_env1_subject\best_val_mpjpe.pth --eval-envs env1 --eval-split test --split-strategy subject --output-dir outputs\source_env1_subject_test
 ```
 
 `eval.py` evaluates `--eval-split test` by default. Use `--eval-split all` only when you intentionally evaluate a full environment subset, such as target-domain few-shot evaluation with excluded training frames.
 
-Source-only runs require exactly one `--source-envs` value, then split subjects inside that environment into 7 train, 1 val, and 2 test subjects. A subject's actions, trials, and frames must stay in exactly one split; never split one subject's frames across train/val/test.
+Source-only runs require exactly one `--source-envs` value. The default `--split-strategy subject` splits subjects inside that environment into 7 train, 1 val, and 2 test subjects. A subject's actions, trials, and frames stay in exactly one split, so use this strategy for unseen-subject generalization results.
+
+Use `--split-strategy frame_random` only as a controlled diagnostic for comparison with same-subject frame-level demo protocols. It deterministically splits every subject's frames into 70% train, 10% validation, and 20% test using the training seed:
+
+```powershell
+python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --split-strategy frame_random --epochs 50 --batch-size 64 --output-dir runs\source_env1_frame_random
+```
+
+```powershell
+python eval.py --dataset-root data\mmfi_pose --checkpoint runs\source_env1_frame_random\best_val_pck_0_2.pth --eval-envs env1 --eval-split test --split-strategy frame_random --output-dir outputs\source_env1_frame_random_test
+```
+
+Frame-random results measure same-subject frame interpolation and intentionally expose subject identity and neighboring motion sequences across splits. Do not report them as unseen-subject generalization. Keep the split strategy, dataset, seed, model, loss, optimizer, scheduler, batch size, and epochs matched when comparing the two protocols. Checkpoints store `split_strategy` in `train_config`, but evaluation still requires the matching explicit `--split-strategy` argument so the protocol remains visible in the command.
 
 ### Cross-Domain Few-Shot Finetune Pipeline
 
