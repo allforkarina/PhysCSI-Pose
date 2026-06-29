@@ -249,6 +249,22 @@ def test_memmap_dataset_rejects_unknown_split_strategy(tmp_path: Path) -> None:
         MemmapDataset(data_dir, split_strategy="unknown")
 
 
+def test_create_memmap_data_loader_forwards_split_strategy(tmp_path: Path) -> None:
+    from dataloader import create_memmap_data_loader
+
+    data_dir = tmp_path / "memmap"
+    _write_memmap_dataset(data_dir)
+    loader = create_memmap_data_loader(
+        data_dir=data_dir,
+        split="train",
+        batch_size=2,
+        split_strategy="frame_random",
+        num_workers=0,
+    )
+
+    assert loader.dataset.split_strategy == "frame_random"
+
+
 def test_create_few_shot_data_loader_returns_only_train_loader_and_indices(tmp_path: Path) -> None:
     from dataloader import create_few_shot_data_loader
 

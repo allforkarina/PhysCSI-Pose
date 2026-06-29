@@ -38,6 +38,7 @@ def create_memmap_data_loader(
     num_workers: int = 0,
     shuffle: bool | None = None,
     seed: int = 42,
+    split_strategy: str = "subject",
 ) -> DataLoader:
     if split not in ALL_SPLITS:
         raise ValueError(f"split must be one of {ALL_SPLITS}, got {split}")
@@ -50,6 +51,7 @@ def create_memmap_data_loader(
         val_subjects=val_subjects,
         test_subjects=test_subjects,
         seed=seed,
+        split_strategy=split_strategy,
     )
     should_shuffle = shuffle if shuffle is not None else split in ("train", "all")
     return DataLoader(
@@ -72,6 +74,7 @@ def create_memmap_data_loaders(
     test_subjects: tuple[str, ...] | None = None,
     num_workers: int = 0,
     seed: int = 42,
+    split_strategy: str = "subject",
 ) -> dict[str, DataLoader]:
     return {
         split: create_memmap_data_loader(
@@ -84,6 +87,7 @@ def create_memmap_data_loaders(
             test_subjects=test_subjects,
             num_workers=num_workers,
             seed=seed,
+            split_strategy=split_strategy,
         )
         for split in SPLIT_NAMES
     }
