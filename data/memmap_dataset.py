@@ -14,7 +14,6 @@ CSI_FILES = {
     "global_zscore": "csi_gzscore.npy",
     "zscore": "csi_zscore.npy",
 }
-SPLIT_STRATEGIES = ("subject", "frame_random")
 
 
 class MemmapDataset(Dataset):
@@ -32,24 +31,15 @@ class MemmapDataset(Dataset):
         data_dir: str | Path,
         split: str = "train",
         envs: Iterable[str] | None = None,
-        train_subjects: Iterable[str] | None = None,
-        val_subjects: Iterable[str] | None = None,
-        test_subjects: Iterable[str] | None = None,
         random_val_ratio: float = 0.1,
         random_test_ratio: float = 0.2,
         seed: int = 42,
         normalize: str = "global_minmax",
-        split_strategy: str = "subject",
     ) -> None:
         if split not in {"train", "val", "test", "all"}:
             raise ValueError(f"split must be train/val/test/all, got {split}")
-        if split_strategy not in SPLIT_STRATEGIES:
-            raise ValueError(
-                f"Unknown split_strategy: {split_strategy}, expected one of {SPLIT_STRATEGIES}"
-            )
         self.split = split
         self.normalize = normalize
-        self.split_strategy = split_strategy
 
         data_dir = Path(data_dir)
 
@@ -68,99 +58,50 @@ class MemmapDataset(Dataset):
         self.indices = self._build_split(
             split,
             envs,
-            train_subjects,
-            val_subjects,
-            test_subjects,
             random_val_ratio,
             random_test_ratio,
             seed,
-            split_strategy,
         )
 
     def _build_split(
         self,
         split: str,
         envs: Iterable[str] | None,
-        train_subjects: Iterable[str] | None,
-        val_subjects: Iterable[str] | None,
-        test_subjects: Iterable[str] | None,
         random_val_ratio: float,
         random_test_ratio: float,
         seed: int,
-        split_strategy: str,
     ) -> np.ndarray:
         num_total = len(self._samples)
         env_list = [str(e) for e in self._envs]
         sample_list = [str(s) for s in self._samples]
 
         env_set = set(envs) if envs else None
-        explicit_subjects = {
-            "train": set(train_subjects) if train_subjects is not None else None,
-            "val": set(val_subjects) if val_subjects is not None else None,
-            "test": set(test_subjects) if test_subjects is not None else None,
-        }
-        subject_set = explicit_subjects.get(split) if split_strategy == "subject" else None
 
         candidate_indices: list[int] = []
         for i in range(num_total):
             if env_set is not None and env_list[i] not in env_set:
                 continue
-            if subject_set is not None and sample_list[i] not in subject_set:
-                continue
             candidate_indices.append(i)
 
         if split == "all":
-            return np.asarray(sorted(candidate_indices), dtype=np.int64)
-        if subject_set is not None:
             return np.asarray(sorted(candidate_indices), dtype=np.int64)
 
         grouped: dict[str, list[int]] = {}
         for idx in candidate_indices:
             grouped.setdefault(sample_list[idx], []).append(idx)
 
-        if split_strategy == "frame_random":
-            rng = random.Random(seed)
-            split_indices: dict[str, list[int]] = {
-                "train": [],
-                "val": [],
-                "test": [],
-            }
-            for subject in sorted(grouped):
-                shuffled = grouped[subject][:]
-                rng.shuffle(shuffled)
-                count = len(shuffled)
-                test_count = min(count, int(round(count * random_test_ratio)))
-                val_count = min(count - test_count, int(round(count * random_val_ratio)))
-                train_count = count - val_count - test_count
-                split_indices["train"].extend(shuffled[:train_count])
-                split_indices["val"].extend(
-                    shuffled[train_count:train_count + val_count]
-                )
-                split_indices["test"].extend(shuffled[train_count + val_count:])
-            return np.asarray(sorted(split_indices[split]), dtype=np.int64)
-
-        subjects = sorted(grouped)
-        n_subjects = len(subjects)
-        test_count = int(round(n_subjects * random_test_ratio))
-        val_count = int(np.ceil(n_subjects * random_val_ratio))
-        if n_subjects >= 3:
-            test_count = max(1, test_count)
-            val_count = max(1, val_count)
-        test_count = min(n_subjects, test_count)
-        val_count = min(n_subjects - test_count, val_count)
-        train_count = n_subjects - val_count - test_count
-        split_subjects = {
-            "train": set(subjects[:train_count]),
-            "val": set(subjects[train_count:train_count + val_count]),
-            "test": set(subjects[train_count + val_count:]),
-        }
-
-        split_indices = {"train": [], "val": [], "test": []}
-        for subject, indices in grouped.items():
-            for split_name, selected_subjects in split_subjects.items():
-                if subject in selected_subjects:
-                    split_indices[split_name].extend(indices)
-                    break
+        rng = random.Random(seed)
+        split_indices: dict[str, list[int]] = {"train": [], "val": [], "test": []}
+        for subject in sorted(grouped):
+            shuffled = grouped[subject][:]
+            rng.shuffle(shuffled)
+            count = len(shuffled)
+            test_count = min(count, int(round(count * random_test_ratio)))
+            val_count = min(count - test_count, int(round(count * random_val_ratio)))
+            train_count = count - val_count - test_count
+            split_indices["train"].extend(shuffled[:train_count])
+            split_indices["val"].extend(shuffled[train_count:train_count + val_count])
+            split_indices["test"].extend(shuffled[train_count + val_count:])
         return np.asarray(sorted(split_indices[split]), dtype=np.int64)
 
     def _sample_few_shot(
