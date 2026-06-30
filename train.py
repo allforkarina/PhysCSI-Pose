@@ -15,7 +15,6 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler, OneCycleLR
 from torch.utils.data import DataLoader, Subset
 
-from data.memmap_dataset import SPLIT_STRATEGIES
 from dataloader import create_few_shot_data_loader, create_memmap_data_loader, create_memmap_data_loaders
 from models import AXIAL_ENCODER_MODES, DECODER_TYPES, H36M17_BONE_EDGES, WiFlowModel
 
@@ -72,7 +71,6 @@ class TrainConfig:
     subset_size: int | None = None
     mode: str = ""
     source_envs: tuple[str, ...] | None = None
-    split_strategy: str = "subject"
     target_envs: tuple[str, ...] | None = None
     finetune_from: str | None = None
     few_shot_subjects: int = 4
@@ -464,34 +462,12 @@ def select_device(device_name: str) -> torch.device:
     return torch.device(device_name)
 
 
-def _resolve_source_subject_splits(
-    dataset_root: str | Path,
+def _validate_source_envs(
     source_envs: tuple[str, ...] | None,
-) -> dict[str, tuple[str, ...]]:
+) -> tuple[str, ...]:
     if source_envs is None or len(source_envs) != 1:
         raise ValueError("source_only mode requires exactly one source environment, e.g. --source-envs env1")
-
-    source_env = source_envs[0]
-    meta = np.load(str(Path(dataset_root) / "meta.npz"), allow_pickle=True)
-    environments = [str(env) for env in meta["environment"]]
-    subjects = [str(subject) for subject in meta["sample"]]
-    source_subjects = sorted({
-        subject
-        for env, subject in zip(environments, subjects)
-        if env == source_env
-    })
-
-    if len(source_subjects) != 10:
-        raise ValueError(
-            f"source_only mode expects exactly 10 subjects in {source_env} for a 7/1/2 split, "
-            f"found {len(source_subjects)}"
-        )
-
-    return {
-        "train": tuple(source_subjects[:7]),
-        "val": tuple(source_subjects[7:8]),
-        "test": tuple(source_subjects[8:10]),
-    }
+    return source_envs
 
 
 def _normalization_parameter_names(model: nn.Module) -> set[str]:
@@ -619,9 +595,7 @@ def apply_finetune_tier(model: nn.Module, tier: int = 1) -> int:
 
 
 def _run_source_only(config: TrainConfig, device: torch.device, output_dir: Path) -> None:
-    subject_splits = _resolve_source_subject_splits(config.dataset_root, config.source_envs)
-    envs = config.source_envs
-    use_subject_split = config.split_strategy == "subject"
+    envs = _validate_source_envs(config.source_envs)
     loaders: dict[str, DataLoader] = {}
     for split in ("train", "val", "test"):
         loaders[split] = create_memmap_data_loader(
@@ -629,26 +603,15 @@ def _run_source_only(config: TrainConfig, device: torch.device, output_dir: Path
             split=split,
             batch_size=config.batch_size,
             envs=envs,
-            train_subjects=subject_splits["train"] if use_subject_split else None,
-            val_subjects=subject_splits["val"] if use_subject_split else None,
-            test_subjects=subject_splits["test"] if use_subject_split else None,
             num_workers=config.num_workers,
             seed=config.seed,
-            split_strategy=config.split_strategy,
         )
-    if use_subject_split:
-        print(
-            "Source split strategy: subject; "
-            f"train={subject_splits['train']}, val={subject_splits['val']}, "
-            f"test={subject_splits['test']}"
-        )
-    else:
-        print(
-            "Source split strategy: frame_random; "
-            f"train_frames={len(loaders['train'].dataset)}, "
-            f"val_frames={len(loaders['val'].dataset)}, "
-            f"test_frames={len(loaders['test'].dataset)}"
-        )
+    print(
+        "Source random frame split: "
+        f"train_frames={len(loaders['train'].dataset)}, "
+        f"val_frames={len(loaders['val'].dataset)}, "
+        f"test_frames={len(loaders['test'].dataset)}"
+    )
 
     train_loader = maybe_subset_loader(loaders["train"], config.subset_size)
     val_loader = maybe_subset_loader(loaders["val"], config.subset_size)
@@ -1051,15 +1014,6 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
         default=None,
         help="Source environment names. source_only mode requires exactly one environment.",
-    )
-    parser.add_argument(
-        "--split-strategy",
-        default="subject",
-        choices=SPLIT_STRATEGIES,
-        help=(
-            "Source split protocol: subject-disjoint or diagnostic random frames "
-            "within each subject."
-        ),
     )
     parser.add_argument("--target-envs", nargs="*", default=None, help="Target environment names")
     parser.add_argument("--finetune-from", default=None, help="Path to source checkpoint for finetune")

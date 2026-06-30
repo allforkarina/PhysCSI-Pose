@@ -5,11 +5,13 @@ from argparse import Namespace
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import eval as eval_module
+import train as train_module
 from eval import _compute_diagnostics
 
 
@@ -40,7 +42,6 @@ def _minimal_eval_args(tmp_path: Path, *, eval_split: str) -> Namespace:
         device="cpu",
         eval_envs=None,
         eval_split=eval_split,
-        split_strategy="frame_random",
         exclude_indices=None,
         feature_viz=False,
         pose_viz=False,
@@ -59,9 +60,8 @@ def test_eval_main_uses_test_split_by_default_and_labels_metrics_as_test(
     seen: dict[str, str] = {}
 
     class FakeDataset(torch.utils.data.Dataset):
-        def __init__(self, data_dir, split, envs=None, split_strategy="subject"):
+        def __init__(self, data_dir, split, envs=None):
             seen["split"] = split
-            seen["split_strategy"] = split_strategy
 
         def __len__(self) -> int:
             return 1
@@ -85,7 +85,6 @@ def test_eval_main_uses_test_split_by_default_and_labels_metrics_as_test(
     eval_module.main()
 
     assert seen["split"] == "test"
-    assert seen["split_strategy"] == "frame_random"
     assert "--- Test Metrics ---" in capsys.readouterr().out
 
 
@@ -97,9 +96,8 @@ def test_eval_main_uses_explicit_all_split_and_labels_metrics_as_all(
     seen: dict[str, str] = {}
 
     class FakeDataset(torch.utils.data.Dataset):
-        def __init__(self, data_dir, split, envs=None, split_strategy="subject"):
+        def __init__(self, data_dir, split, envs=None):
             seen["split"] = split
-            seen["split_strategy"] = split_strategy
 
         def __len__(self) -> int:
             return 1
@@ -123,5 +121,38 @@ def test_eval_main_uses_explicit_all_split_and_labels_metrics_as_all(
     eval_module.main()
 
     assert seen["split"] == "all"
-    assert seen["split_strategy"] == "frame_random"
     assert "--- All Metrics ---" in capsys.readouterr().out
+
+
+def test_train_and_eval_reject_removed_split_strategy(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "train.py",
+            "--mode",
+            "source_only",
+            "--dataset-root",
+            "data",
+            "--split-strategy",
+            "frame_random",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        train_module.parse_args()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "eval.py",
+            "--dataset-root",
+            "data",
+            "--checkpoint",
+            "model.pth",
+            "--split-strategy",
+            "frame_random",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        eval_module.parse_args()
