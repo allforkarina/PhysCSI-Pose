@@ -42,10 +42,11 @@ The memmap CSI tensor is built from raw `CSIamp` shaped `[3, 114, 10]`, Fourier-
 
 ## Source-Domain Split Protocol
 
-For source-only training, split selection is strictly ordered:
+For source-only training, split selection is fixed:
 
 1. Select exactly one source environment, for example `--source-envs env1`.
-2. Split subjects within that environment into 7 train subjects, 1 val subject, and 2 test subjects.
-3. Assign every action/trial/frame for a subject to exactly one split.
+2. Group the environment's frames by subject.
+3. Deterministically shuffle each subject's frames with seed 42.
+4. Assign 70% of each subject's frames to train, 10% to validation, and 20% to test.
 
-Do not randomly split frames from the same subject across train, val, and test.
+Train, validation, and test frame indices are mutually exclusive and jointly cover the selected environment. Random frame-level splitting is the only project protocol.

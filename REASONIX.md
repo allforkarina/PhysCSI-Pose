@@ -15,7 +15,8 @@
 - `models/` — `WiFlowModel`, spatial encoder, axial encoder, joint/hierarchical decoders, skeleton
 - `evaluation/` — forward hooks, feature viz, pose viz
 - `scripts/` — `build_memmap.py`, `build_groundtruth.py`, `visualize_gt.py`
-- `outputs/` — training/eval artifacts (gitignored)
+- `runs/` — training artifacts (gitignored)
+- `outputs/` — evaluation artifacts (gitignored)
 - `pose_targets.py` — reserved, currently empty
 - `docs/` — planning docs and specs
 
@@ -25,11 +26,11 @@
 python scripts\build_memmap.py --src D:\path\to\raw\dataset --dst data\mmfi_pose --gt-dir D:\path\to\ground_truth_npy --workers 4
 
 # Train
-python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --epochs 50 --batch-size 64 --output-dir outputs\train
+python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --epochs 50 --batch-size 64 --output-dir runs\source_env1
 # Evaluate
-python eval.py --dataset-root data\mmfi_pose --checkpoint outputs\train\best_val_mpjpe.pth --output-dir outputs\eval
+python eval.py --dataset-root data\mmfi_pose --checkpoint runs\source_env1\best_val_mpjpe.pth --eval-envs env1 --eval-split test --output-dir outputs\source_env1_test
 # eval.py defaults to --eval-split test; use --eval-split all only for explicit full-subset evaluation.
-# Source-only split protocol: require exactly one source env, then split whole subjects 7/1/2 into train/val/test.
+# Source-only split protocol: require exactly one source env, then split every subject's frames 70/10/20 into train/val/test.
 
 # Few-shot cross-domain
 python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs env1 --output-dir outputs\source --epochs 50
