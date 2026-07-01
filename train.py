@@ -15,6 +15,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler, OneCycleLR
 from torch.utils.data import DataLoader, Subset
 
+from data.memmap_dataset import CSI_NORMALIZATIONS
 from dataloader import create_few_shot_data_loader, create_memmap_data_loader, create_memmap_data_loaders
 from models import AXIAL_ENCODER_MODES, DECODER_TYPES, H36M17_BONE_EDGES, WiFlowModel
 
@@ -56,6 +57,7 @@ NORMALIZATION_MODULES = (
 class TrainConfig:
     dataset_root: str
     output_dir: str = "outputs/train"
+    normalization: str = "global_minmax"
     axial_mode: str = "spatial_then_temporal"
     decoder_type: str = "joint"
     epochs: int = 50
@@ -605,6 +607,7 @@ def _run_source_only(config: TrainConfig, device: torch.device, output_dir: Path
             envs=envs,
             num_workers=config.num_workers,
             seed=config.seed,
+            normalization=config.normalization,
         )
     print(
         "Source random frame split: "
@@ -738,6 +741,7 @@ def _run_finetune(config: TrainConfig, device: torch.device, output_dir: Path) -
         batch_size=config.batch_size,
         num_workers=config.num_workers,
         seed=config.seed,
+        normalization=config.normalization,
     )
     print(f"Few-shot train: {len(train_indices)} frames")
 
@@ -847,6 +851,7 @@ def _run_finetune_align(config: TrainConfig, device: torch.device, output_dir: P
         envs=source_envs,
         num_workers=config.num_workers,
         seed=config.seed,
+        normalization=config.normalization,
     )
     source_loader = maybe_subset_loader(source_loader, config.subset_size)
     target_loader, train_indices = create_few_shot_data_loader(
@@ -857,6 +862,7 @@ def _run_finetune_align(config: TrainConfig, device: torch.device, output_dir: P
         batch_size=config.batch_size,
         num_workers=config.num_workers,
         seed=config.seed,
+        normalization=config.normalization,
     )
     print(
         f"Source train: {len(source_loader.dataset)} frames; "
@@ -1004,6 +1010,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", required=True, choices=("source_only", "finetune", "finetune_align"))
     parser.add_argument("--dataset-root", required=True, help="Path to the NPY memmap dataset directory.")
     parser.add_argument("--output-dir", default="outputs/train", help="Directory for logs and checkpoints.")
+    parser.add_argument(
+        "--normalization",
+        default="global_minmax",
+        choices=CSI_NORMALIZATIONS,
+        help="Precomputed CSI input normalization stored in the memmap dataset.",
+    )
     parser.add_argument("--axial-mode", default="spatial_then_temporal", choices=AXIAL_ENCODER_MODES)
     parser.add_argument("--decoder-type", default="joint", choices=DECODER_TYPES)
     parser.add_argument("--epochs", type=int, default=50)
