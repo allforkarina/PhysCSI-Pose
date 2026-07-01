@@ -46,10 +46,14 @@ def _joint_group(joint_index: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_checkpoint_model(
+def resolve_checkpoint_normalization(train_config: Mapping[str, Any]) -> str:
+    return str(train_config.get("normalization", "global_minmax"))
+
+
+def load_checkpoint_model_and_config(
     checkpoint_path: str | Path,
     device: torch.device,
-) -> WiFlowModel:
+) -> tuple[WiFlowModel, Mapping[str, Any]]:
     """Reconstruct a WiFlowModel from a training checkpoint.
 
     Reads the saved ``train_config`` dict to restore the correct axial mode
@@ -70,6 +74,14 @@ def load_checkpoint_model(
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
+    return model, train_config
+
+
+def load_checkpoint_model(
+    checkpoint_path: str | Path,
+    device: torch.device,
+) -> WiFlowModel:
+    model, _ = load_checkpoint_model_and_config(checkpoint_path, device)
     return model
 
 
@@ -392,7 +404,8 @@ def main() -> None:
         sys.exit(2)
 
     device = select_device(args.device)
-    model = load_checkpoint_model(args.checkpoint, device)
+    model, train_config = load_checkpoint_model_and_config(args.checkpoint, device)
+    normalization = resolve_checkpoint_normalization(train_config)
 
     eval_envs = tuple(args.eval_envs) if args.eval_envs else None
     eval_split = args.eval_split
@@ -404,6 +417,7 @@ def main() -> None:
         data_dir=args.dataset_root,
         split=eval_split,
         envs=eval_envs,
+        normalization=normalization,
     )
 
     if args.exclude_indices:
@@ -456,6 +470,7 @@ def main() -> None:
             data_dir=args.dataset_root,
             split=eval_split,
             envs=eval_envs,
+            normalization=normalization,
         )
         run_pose_visualization(
             model=model,

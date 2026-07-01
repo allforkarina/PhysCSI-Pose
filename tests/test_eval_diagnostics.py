@@ -60,7 +60,7 @@ def test_eval_main_uses_test_split_by_default_and_labels_metrics_as_test(
     seen: dict[str, str] = {}
 
     class FakeDataset(torch.utils.data.Dataset):
-        def __init__(self, data_dir, split, envs=None):
+        def __init__(self, data_dir, split, envs=None, normalization="global_minmax"):
             seen["split"] = split
 
         def __len__(self) -> int:
@@ -71,7 +71,11 @@ def test_eval_main_uses_test_split_by_default_and_labels_metrics_as_test(
 
     monkeypatch.setattr(eval_module, "parse_args", lambda: _minimal_eval_args(tmp_path, eval_split="test"))
     monkeypatch.setattr(eval_module, "select_device", lambda device: torch.device("cpu"))
-    monkeypatch.setattr(eval_module, "load_checkpoint_model", lambda checkpoint, device: object())
+    monkeypatch.setattr(
+        eval_module,
+        "load_checkpoint_model_and_config",
+        lambda checkpoint, device: (object(), {}),
+    )
     monkeypatch.setattr(eval_module, "MemmapDataset", FakeDataset)
     monkeypatch.setattr(eval_module, "run_evaluation", lambda model, loader, device: {
         "overall": {"mpjpe": 1.0},
@@ -96,7 +100,7 @@ def test_eval_main_uses_explicit_all_split_and_labels_metrics_as_all(
     seen: dict[str, str] = {}
 
     class FakeDataset(torch.utils.data.Dataset):
-        def __init__(self, data_dir, split, envs=None):
+        def __init__(self, data_dir, split, envs=None, normalization="global_minmax"):
             seen["split"] = split
 
         def __len__(self) -> int:
@@ -107,7 +111,11 @@ def test_eval_main_uses_explicit_all_split_and_labels_metrics_as_all(
 
     monkeypatch.setattr(eval_module, "parse_args", lambda: _minimal_eval_args(tmp_path, eval_split="all"))
     monkeypatch.setattr(eval_module, "select_device", lambda device: torch.device("cpu"))
-    monkeypatch.setattr(eval_module, "load_checkpoint_model", lambda checkpoint, device: object())
+    monkeypatch.setattr(
+        eval_module,
+        "load_checkpoint_model_and_config",
+        lambda checkpoint, device: (object(), {}),
+    )
     monkeypatch.setattr(eval_module, "MemmapDataset", FakeDataset)
     monkeypatch.setattr(eval_module, "run_evaluation", lambda model, loader, device: {
         "overall": {"mpjpe": 1.0},
@@ -122,6 +130,50 @@ def test_eval_main_uses_explicit_all_split_and_labels_metrics_as_all(
 
     assert seen["split"] == "all"
     assert "--- All Metrics ---" in capsys.readouterr().out
+
+
+def test_eval_main_uses_checkpoint_normalization_for_eval_and_pose_viz(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from evaluation import pose_viz
+
+    seen: list[str] = []
+    args = _minimal_eval_args(tmp_path, eval_split="test")
+    args.pose_viz = True
+
+    class FakeDataset(torch.utils.data.Dataset):
+        def __init__(self, data_dir, split, envs=None, normalization="global_minmax"):
+            seen.append(normalization)
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, index: int) -> dict:
+            raise AssertionError("evaluation and visualization are mocked")
+
+    monkeypatch.setattr(eval_module, "parse_args", lambda: args)
+    monkeypatch.setattr(eval_module, "select_device", lambda device: torch.device("cpu"))
+    monkeypatch.setattr(
+        eval_module,
+        "load_checkpoint_model_and_config",
+        lambda checkpoint, device: (object(), {"normalization": "global_zscore"}),
+        raising=False,
+    )
+    monkeypatch.setattr(eval_module, "MemmapDataset", FakeDataset)
+    monkeypatch.setattr(eval_module, "run_evaluation", lambda model, loader, device: {
+        "overall": {"mpjpe": 1.0},
+        "joint_rows": [],
+        "action_rows": [],
+        "environment_rows": [],
+        "diagnostic": {"overall": {}, "joint_rows": []},
+    })
+    monkeypatch.setattr(eval_module, "_write_csv", lambda path, rows: None)
+    monkeypatch.setattr(pose_viz, "run_pose_visualization", lambda **kwargs: None)
+
+    eval_module.main()
+
+    assert seen == ["global_zscore", "global_zscore"]
 
 
 def test_train_and_eval_reject_removed_split_strategy(monkeypatch) -> None:

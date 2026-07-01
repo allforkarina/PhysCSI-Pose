@@ -162,3 +162,59 @@ def test_checkpoint_records_normalization(tmp_path: Path) -> None:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
     assert checkpoint["train_config"]["normalization"] == "global_zscore"
+
+
+def test_resolve_checkpoint_normalization_uses_saved_value() -> None:
+    from eval import resolve_checkpoint_normalization
+
+    assert resolve_checkpoint_normalization(
+        {"normalization": "per_sample_zscore"}
+    ) == "per_sample_zscore"
+
+
+def test_resolve_checkpoint_normalization_falls_back_for_old_checkpoint() -> None:
+    from eval import resolve_checkpoint_normalization
+
+    assert resolve_checkpoint_normalization({}) == "global_minmax"
+
+
+def test_load_checkpoint_model_and_config_returns_saved_config(monkeypatch) -> None:
+    import eval as eval_module
+
+    seen: dict[str, object] = {}
+    train_config = {
+        "axial_mode": "parallel_sum",
+        "decoder_type": "hierarchical",
+        "normalization": "global_zscore",
+    }
+    checkpoint = {
+        "model_state_dict": {"weight": torch.tensor(1.0)},
+        "train_config": train_config,
+    }
+
+    class FakeModel:
+        def __init__(self, input_channels, axial_mode, decoder_type):
+            seen["init"] = (input_channels, axial_mode, decoder_type)
+
+        def to(self, device):
+            seen["device"] = device
+            return self
+
+        def load_state_dict(self, state_dict):
+            seen["state_dict"] = state_dict
+
+        def eval(self):
+            seen["eval"] = True
+
+    monkeypatch.setattr(eval_module.torch, "load", lambda path, map_location: checkpoint)
+    monkeypatch.setattr(eval_module, "WiFlowModel", FakeModel)
+
+    model, loaded_config = eval_module.load_checkpoint_model_and_config(
+        "checkpoint.pth",
+        torch.device("cpu"),
+    )
+
+    assert isinstance(model, FakeModel)
+    assert loaded_config is train_config
+    assert seen["init"] == (3, "parallel_sum", "hierarchical")
+    assert seen["eval"] is True
