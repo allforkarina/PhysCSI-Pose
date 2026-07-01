@@ -35,6 +35,7 @@ def create_memmap_data_loader(
     num_workers: int = 0,
     shuffle: bool | None = None,
     seed: int = 42,
+    normalization: str = "global_minmax",
 ) -> DataLoader:
     if split not in ALL_SPLITS:
         raise ValueError(f"split must be one of {ALL_SPLITS}, got {split}")
@@ -44,6 +45,7 @@ def create_memmap_data_loader(
         split=split,
         envs=envs,
         seed=seed,
+        normalization=normalization,
     )
     should_shuffle = shuffle if shuffle is not None else split in ("train", "all")
     return DataLoader(
@@ -63,6 +65,7 @@ def create_memmap_data_loaders(
     envs: tuple[str, ...] | None = None,
     num_workers: int = 0,
     seed: int = 42,
+    normalization: str = "global_minmax",
 ) -> dict[str, DataLoader]:
     return {
         split: create_memmap_data_loader(
@@ -72,6 +75,7 @@ def create_memmap_data_loaders(
             envs=envs,
             num_workers=num_workers,
             seed=seed,
+            normalization=normalization,
         )
         for split in SPLIT_NAMES
     }
@@ -85,12 +89,14 @@ def create_few_shot_data_loader(
     batch_size: int,
     num_workers: int = 0,
     seed: int = 42,
+    normalization: str = "global_minmax",
 ) -> tuple[DataLoader, list[int]]:
     full_dataset = MemmapDataset(
         data_dir=data_dir,
         split="all",
         envs=target_envs,
         seed=seed,
+        normalization=normalization,
     )
     train_indices = full_dataset._sample_few_shot(
         few_shot_subjects=few_shot_subjects,

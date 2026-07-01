@@ -12,8 +12,9 @@ from torch.utils.data import Dataset
 CSI_FILES = {
     "global_minmax": "csi_gminmax.npy",
     "global_zscore": "csi_gzscore.npy",
-    "zscore": "csi_zscore.npy",
+    "per_sample_zscore": "csi_zscore.npy",
 }
+CSI_NORMALIZATIONS = tuple(CSI_FILES)
 
 
 class MemmapDataset(Dataset):
@@ -34,19 +35,22 @@ class MemmapDataset(Dataset):
         random_val_ratio: float = 0.1,
         random_test_ratio: float = 0.2,
         seed: int = 42,
-        normalize: str = "global_minmax",
+        normalization: str = "global_minmax",
     ) -> None:
         if split not in {"train", "val", "test", "all"}:
             raise ValueError(f"split must be train/val/test/all, got {split}")
         self.split = split
-        self.normalize = normalize
+        self.normalization = normalization
 
         data_dir = Path(data_dir)
 
-        if normalize not in CSI_FILES:
-            raise ValueError(f"Unknown normalize mode: {normalize}, expected one of {list(CSI_FILES)}")
+        if normalization not in CSI_FILES:
+            raise ValueError(
+                f"Unknown normalization mode: {normalization}, "
+                f"expected one of {list(CSI_FILES)}"
+            )
 
-        self._csi = np.load(str(data_dir / CSI_FILES[normalize]), mmap_mode="r")
+        self._csi = np.load(str(data_dir / CSI_FILES[normalization]), mmap_mode="r")
 
         self._keypoints = np.load(str(data_dir / "ground_truth.npy"))
 
