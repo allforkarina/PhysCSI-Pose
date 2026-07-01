@@ -50,3 +50,25 @@ For source-only training, split selection is fixed:
 4. Assign 70% of each subject's frames to train, 10% to validation, and 20% to test.
 
 Train, validation, and test frame indices are mutually exclusive and jointly cover the selected environment. Random frame-level splitting is the only project protocol.
+
+## CSI Input Normalization Ablation
+
+Training exposes three precomputed CSI representations through `--normalization`:
+
+- `global_minmax` loads `csi_gminmax.npy` and remains the default.
+- `global_zscore` loads `csi_gzscore.npy`.
+- `per_sample_zscore` loads `csi_zscore.npy`.
+
+The selected value is saved in checkpoint `train_config`. Evaluation restores it automatically; do not manually substitute CSI files. Checkpoints created before this option default to `global_minmax`.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train.py --mode source_only --dataset-root /data/WiFiPose/dataset/mmfi_pose_v3 --source-envs env1 --normalization global_minmax --epochs 50 --batch-size 64 --num-workers 8 --output-dir runs/source_env1_global_minmax
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train.py --mode source_only --dataset-root /data/WiFiPose/dataset/mmfi_pose_v3 --source-envs env1 --normalization global_zscore --epochs 50 --batch-size 64 --num-workers 8 --output-dir runs/source_env1_global_zscore
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train.py --mode source_only --dataset-root /data/WiFiPose/dataset/mmfi_pose_v3 --source-envs env1 --normalization per_sample_zscore --epochs 50 --batch-size 64 --num-workers 8 --output-dir runs/source_env1_per_sample_zscore
+```

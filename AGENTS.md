@@ -1,13 +1,13 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `dataloader.py`: Core module for loading NPY memmap datasets, creating PyTorch `DataLoader` instances with `memmap_collate_fn`, and providing `create_memmap_data_loader` / `create_memmap_data_loaders` / `create_few_shot_data_loader` factory functions.
-- `data/memmap_dataset.py`: NPY memmap dataset reader that loads CSI amplitude, Human3.6M-17 keypoints, and metadata from `.npy`/`.npz` files with zero-copy OS-cached I/O.
+- `dataloader.py`: Core module for loading NPY memmap datasets, propagating canonical CSI input normalization, creating PyTorch `DataLoader` instances with `memmap_collate_fn`, and providing `create_memmap_data_loader` / `create_memmap_data_loaders` / `create_few_shot_data_loader` factory functions.
+- `data/memmap_dataset.py`: NPY memmap dataset reader that selects `global_minmax`, `global_zscore`, or `per_sample_zscore` CSI amplitude, loads Human3.6M-17 keypoints and metadata, and provides zero-copy OS-cached I/O.
 - `data/heatmap_gt.py`: Human3.6M-17 coordinate validation/extraction utilities (`extract_h36m17_xy`, `valid_point`).
 - `pose_targets.py`: Reserved for future pose target utilities.
 - `models/`: PyTorch model code, including the full WiFlow model, CSI spatial encoder with symmetric spatio-temporal downsampling, axial attention encoder, multi-layer joint cross-attention decoder, hierarchical joint decoder ablation, and shared Human3.6M-17 skeleton topology. The active single-frame model path is CSI amplitude input -> spatial encoder with antenna mixing, feature stem, and symmetric time-frequency residual blocks -> axial encoder -> the configured decoder.
-- `train.py`: Root-level training entrypoint for WiFlow pose regression, including losses, metrics, optimizer, scheduler, checkpointing, and CSV logging. Supports `--mode source_only` (single-domain training), `--mode finetune` (cross-domain few-shot finetuning with explicit `--trainable-groups` ablations such as encoder-only, decoder-only, and full finetuning), and `--mode finetune_align` (source/target supervised finetuning with explicit CORAL domain alignment on axial CSI features).
-- `eval.py`: Root-level evaluation entrypoint for loading checkpoints, computing test metrics, and optionally generating research-grade feature visualizations via `--feature-viz`. Supports `--eval-envs` (environment filtering) and `--exclude-indices` (exclude few-shot training frames).
+- `train.py`: Root-level training entrypoint for WiFlow pose regression, including input-normalization selection, losses, metrics, optimizer, scheduler, checkpointing, and CSV logging. The selected normalization is stored in checkpoint `train_config`. Supports `--mode source_only` (single-domain training), `--mode finetune` (cross-domain few-shot finetuning with explicit `--trainable-groups` ablations such as encoder-only, decoder-only, and full finetuning), and `--mode finetune_align` (source/target supervised finetuning with explicit CORAL domain alignment on axial CSI features).
+- `eval.py`: Root-level evaluation entrypoint for loading checkpoints, restoring their CSI input normalization, computing test metrics, and optionally generating research-grade feature visualizations via `--feature-viz`. Supports `--eval-envs` (environment filtering) and `--exclude-indices` (exclude few-shot training frames).
 - `evaluation/`: Evaluation pipeline package.
   - `evaluation/hooks.py`: Forward hook context manager (`WiFlowHookContext`, `wiflow_hooks`) for non-invasive intermediate feature extraction from WiFlow submodules.
   - `evaluation/feature_viz.py`: Orchestrator and figure-drawing functions for research-grade feature visualization (antenna channel response, resblock PCA trajectory, axial attention maps, joint query t-SNE, feature-pose correlation).
@@ -62,6 +62,8 @@ python train.py --mode source_only --dataset-root data\mmfi_pose --source-envs e
 ```
 
 The default training configuration uses CSI amplitude input (3 channels), `OneCycleLR`, gradient clipping, `coord_l1 + 0.5 * bone_l1`, the baseline axial mode `spatial_then_temporal`, and AdamW weight decay.
+
+Supported `--normalization` values are `global_minmax`, `global_zscore`, and `per_sample_zscore`. The default is `global_minmax`. Training passes the selected representation to every loader and stores it in checkpoint `train_config`; evaluation restores it automatically, with `global_minmax` as the compatibility fallback for older checkpoints.
 
 Run an axial-attention encoder ablation:
 
